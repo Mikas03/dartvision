@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:js_interop';
+import 'dart:js_interop_unsafe';
 import 'dart:math' as math;
 import 'dart:ui' show Size;
 import 'dart:ui_web' as ui_web;
@@ -25,6 +26,7 @@ class WebCamera {
   web.MediaRecorder? _recorder;
   final List<web.Blob> _chunks = [];
   String _mimeType = 'video/mp4';
+  web.WakeLockSentinel? _wakeLock;
   web.HTMLCanvasElement? _canvas;
   web.CanvasRenderingContext2D? _context;
 
@@ -87,6 +89,19 @@ class WebCamera {
     updateSize();
     await ready.future.timeout(const Duration(seconds: 10),
         onTimeout: () => throw const CameraException('Kamera liefert kein Bild.'));
+    await _keepScreenOn();
+  }
+
+  /// Verhindert, dass das Display ausgeht, solange die Kamera läuft (sonst pausiert Safari sie).
+  /// Ältere Browser kennen die Wake-Lock-API nicht – dann eben ohne.
+  Future<void> _keepScreenOn() async {
+    final navigator = web.window.navigator;
+    if (!(navigator as JSObject).has('wakeLock')) return;
+    try {
+      _wakeLock = await navigator.wakeLock.request('screen').toDart;
+    } catch (_) {
+      // z. B. Energiesparmodus – kein Grund, die Kamera nicht zu nutzen
+    }
   }
 
   /// Aktuelles Kamerabild, verkleinert auf höchstens [maxWidth] Pixel Breite (für die Erkennung).
@@ -165,6 +180,8 @@ class WebCamera {
   }
 
   void dispose() {
+    _wakeLock?.release();
+    _wakeLock = null;
     _recorder?.stop();
     _recorder = null;
     final tracks = _stream?.getTracks().toDart ?? [];

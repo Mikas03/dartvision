@@ -131,6 +131,16 @@ python -m dartvision play --source data/videos/dart_20261025_220000.mp4 --calibr
 
 Die Kalibrierung wird auch im Browser gespeichert und ist beim nächsten Öffnen wieder da.
 
+### Mit Kamera spielen
+
+Im Spiel das Kamera-Symbol oben antippen (vorher einmal kalibrieren). Erkannte Darts werden
+automatisch eingetragen; das Display bleibt dabei an.
+
+- **Falsch erkannt?** Den Dart in der Aufnahmezeile antippen und das richtige Feld wählen.
+  Das geht auch noch, wenn schon der nächste Spieler dran ist („Letzte Aufnahme“).
+- **Darts nach 1–2 Würfen gezogen** (Rest daneben): die Aufnahme endet automatisch.
+- **Eintragen** öffnet das Tastenfeld für Würfe, die die Kamera nicht sehen kann (z. B. Bounce-out).
+
 ## Wie die Erkennung funktioniert
 
 1. Ein Referenzbild der Scheibe wird gespeichert.
@@ -158,4 +168,6 @@ Die Kalibrierung wird auch im Browser gespeichert und ist beim nächsten Öffnen
 - [x] Erkennung in der App (`app/lib/vision/detector.dart`, gleiche Logik wie `detection.py`;
       `app/test/detector_test.dart` und `tests/test_fixture.py` prüfen auf derselben Szene,
       dass beide Versionen dasselbe Ergebnis liefern)
-- [ ] Erkennung im Spiel: erkannte Darts direkt in den Zähler übernehmen
+- [x] Erkennung im Spiel: erkannte Darts landen im Zähler, Korrektur per Antippen
+- [ ] Mit echter Kamera testen und Erkennung nachschärfen
+- [ ] Sprachansage der Punkte

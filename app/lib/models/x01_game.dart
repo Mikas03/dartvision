@@ -112,6 +112,37 @@ class X01Game {
     if (turn.darts.isNotEmpty) turn.darts.removeLast();
   }
 
+  /// Aufnahme, deren Darts angezeigt und korrigiert werden können: die laufende,
+  /// oder – solange darin noch kein Dart ist – die vorige.
+  Turn? get correctableTurn {
+    if (currentTurn.darts.isNotEmpty) return currentTurn;
+    if (_turns.length > 1) return _turns[_turns.length - 2];
+    return null;
+  }
+
+  /// Ersetzt Dart Nr. [index] der [correctableTurn] durch [hit] und rechnet alles danach neu
+  /// (z. B. wenn die Kamera ein Feld falsch erkannt hat).
+  void correctDart(int index, Hit hit) {
+    final turn = correctableTurn;
+    if (turn == null || index < 0 || index >= turn.darts.length) {
+      throw RangeError('Kein Dart $index zum Korrigieren');
+    }
+    final later = turn.darts.sublist(index + 1);
+    // Wurde die Aufnahme vorzeitig beendet (Darts gezogen), soll sie das danach wieder sein
+    final endedEarly = turn.finished && !turn.bust && !isOver && turn.darts.length < dartsPerTurn;
+
+    // Darts ab [index] zurücknehmen; das öffnet die Aufnahme bei Bedarf wieder
+    while (turn.darts.length > index) {
+      undo();
+    }
+    throwDart(hit);
+    for (final h in later) {
+      if (isOver || turn.finished || !identical(currentTurn, turn)) break;
+      throwDart(h);
+    }
+    if (endedEarly && identical(currentTurn, turn) && !turn.finished) nextPlayer();
+  }
+
   void _finishTurn({bool bust = false}) {
     currentTurn
       ..bust = bust

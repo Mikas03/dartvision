@@ -68,4 +68,59 @@ void main() {
     expect(game.currentTurn.bust, isFalse);
     expect(game.canUndo, isFalse);
   });
+
+  group('Korrigieren', () {
+    test('Dart in der laufenden Aufnahme', () {
+      final game = X01Game(players: ['A', 'B']);
+      throwAll(game, [const Hit.triple(20), const Hit.single(5)]);
+      game.correctDart(0, const Hit.single(20));
+      expect(game.currentTurn.darts, [const Hit.single(20), const Hit.single(5)]);
+      expect(game.displayRemaining(0), 476);
+    });
+
+    test('letzter Dart, nachdem schon der nächste Spieler dran ist', () {
+      final game = X01Game(players: ['A', 'B']);
+      throwAll(game, [const Hit.triple(20), const Hit.triple(20), const Hit.triple(5)]);
+      expect(game.currentPlayer, 1);
+      expect(game.correctableTurn!.player, 0);
+
+      game.correctDart(2, const Hit.triple(20));
+      expect(game.remaining(0), 321);
+      expect(game.currentPlayer, 1);
+      expect(game.currentTurn.darts, isEmpty);
+    });
+
+    test('Korrektur macht aus einem Bust einen gültigen Wurf', () {
+      final game = X01Game(players: ['A', 'B'], startScore: 40);
+      game.throwDart(const Hit.triple(20)); // Bust
+      expect(game.currentPlayer, 1);
+      game.correctDart(0, const Hit.single(20));
+      expect(game.currentPlayer, 0);
+      expect(game.displayRemaining(0), 20);
+    });
+
+    test('Korrektur zum Checkout beendet das Spiel', () {
+      final game = X01Game(players: ['A', 'B'], startScore: 40);
+      game.throwDart(const Hit.single(20));
+      game.correctDart(0, const Hit.double(20));
+      expect(game.winner, 0);
+    });
+
+    test('vorzeitig beendete Aufnahme bleibt beendet', () {
+      final game = X01Game(players: ['A', 'B']);
+      game.throwDart(const Hit.triple(19));
+      game.nextPlayer(); // Darts gezogen, Rest daneben
+      game.correctDart(0, const Hit.triple(20));
+      expect(game.remaining(0), 441);
+      expect(game.currentPlayer, 1);
+    });
+
+    test('mittlerer Dart, spätere Darts werden neu verrechnet', () {
+      final game = X01Game(players: ['A'], startScore: 100);
+      throwAll(game, [const Hit.single(20), const Hit.triple(20)]); // Rest 20
+      game.correctDart(0, const Hit.triple(20)); // 60 + 60 > 100 -> Bust
+      expect(game.turns.first.bust, isTrue);
+      expect(game.remaining(0), 100);
+    });
+  });
 }
