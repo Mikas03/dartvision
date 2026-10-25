@@ -8,6 +8,8 @@ import '../models/checkout.dart';
 import '../models/hit.dart';
 import '../models/match.dart';
 import '../models/x01_game.dart';
+import '../online/backend.dart';
+import '../online/online_session.dart';
 import '../services/speech.dart';
 import '../vision/calibration.dart';
 import '../vision/live_detection.dart';
@@ -19,9 +21,12 @@ import '../widgets/scoreboard.dart';
 import 'camera_screen.dart';
 
 class GameScreen extends StatefulWidget {
-  const GameScreen({super.key, required this.match, this.inputMode = InputMode.perDart});
+  const GameScreen({super.key, required this.match, this.inputMode = InputMode.perDart, this.online});
 
   final Match match;
+
+  /// Bei Online-Spielen: Abgleich mit dem Gegner über den Server.
+  final OnlineSession? online;
 
   /// Eingabeart zu Beginn (Gesamtpunktzahl nur bei X01); lässt sich im Spiel umschalten.
   final InputMode inputMode;
@@ -46,25 +51,92 @@ class _GameScreenState extends State<GameScreen> {
   /// Ob gerade ein Bot an der Reihe ist (dann sind die Eingaben gesperrt).
   bool get _botTurn => !_game.isOver && _match.players[_game.currentPlayer].isBot;
 
+  OnlineSession? get _online => widget.online;
+
+  /// Online: nur der Spieler am Zug wirft (auf seinem eigenen Gerät).
+  bool get _myTurn => _online == null || _online!.isMine(_game.currentPlayer);
+
+  /// Ob gerade eingegeben werden darf.
+  bool get _inputAllowed => !_game.isOver && !_botTurn && _myTurn;
+
+  /// Online darf man nur eigene Würfe zurücknehmen – und nur, solange der Gegner noch nicht geworfen hat.
+  bool get _canUndo {
+    if (!_match.canUndo) return false;
+    final online = _online;
+    if (online == null) return true;
+    final turn = _game.correctableTurn;
+    return turn != null && online.isMine(turn.player) && (_myTurn || _game.currentTurn.darts.isEmpty);
+  }
+
   String _name(int player) => _match.players[player].name;
 
   @override
   void initState() {
     super.initState();
+    final online = _online;
+    if (online != null) {
+      online
+        ..onRemoteState = _onRemoteState
+        ..onAborted = _onAborted
+        ..onSyncError = () {
+          if (mounted) setState(() => _message = 'Keine Verbindung zum Server – Wurf nicht übertragen');
+        };
+      online.start();
+    }
     _scheduleBot();
   }
 
   @override
   void dispose() {
     _botTimer?.cancel();
+    _nextLegTimer?.cancel();
     _live?.dispose();
+    _online?.leave(finished: _match.isOver);
     super.dispose();
+  }
+
+  Timer? _nextLegTimer;
+
+  /// Online: eigenen Spielstand an den Gegner schicken.
+  void _sync() => _online?.push(_match);
+
+  /// Online: neuer Spielstand vom Gegner.
+  void _onRemoteState(Match match) {
+    if (!mounted) return;
+    final before = _match;
+    setState(() {
+      _match = match;
+      _message = null;
+    });
+    final game = match.leg;
+    if (match.isOver && !before.isOver) {
+      _onMatchWon(match.winner!);
+    } else if (game.isOver) {
+      setState(() => _message = 'Leg an ${_name(game.winner!)}');
+    } else {
+      final last = game.correctableTurn;
+      if (last != null && last.finished && !_online!.isMine(last.player)) _announceTurn(last);
+    }
+  }
+
+  void _onAborted() {
+    if (!mounted || _match.isOver) return;
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Spiel beendet'),
+        content: const Text('Dein Gegner hat das Spiel verlassen.'),
+        actions: [FilledButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
+      ),
+    ).then((_) {
+      if (mounted) Navigator.of(context).pop();
+    });
   }
 
   // ---------------------------------------------------------------- Spielzüge
 
   void _onHit(Hit hit, {bool fromBot = false}) {
-    if (_game.isOver || (_botTurn && !fromBot)) return;
+    if (_game.isOver || (_botTurn && !fromBot) || !_myTurn) return;
     final player = _game.currentPlayer;
     final turn = _game.currentTurn;
     _handleResult(_game.throwDart(hit), player, turn);
@@ -82,6 +154,7 @@ class _GameScreenState extends State<GameScreen> {
       };
     });
     if (result == ThrowResult.bust || result == ThrowResult.turnOver) _announceTurn(turn);
+    _sync();
     if (result == ThrowResult.win) {
       _onLegWon(_game.winner!);
     } else {
@@ -108,7 +181,7 @@ class _GameScreenState extends State<GameScreen> {
   /// Eingabe der Gesamtpunktzahl (X01). Liefert eine Fehlermeldung für das Zahlenfeld oder null.
   Future<String?> _onTotal(int score) async {
     final x01 = _x01;
-    if (x01 == null || x01.isOver || _botTurn) return null;
+    if (x01 == null || !_inputAllowed) return null;
     final player = x01.currentPlayer;
     var darts = dartsPerTurn;
     if (score == x01.remaining(player) && score > 0) {
@@ -158,6 +231,7 @@ class _GameScreenState extends State<GameScreen> {
 
   /// Rückgängig – Bot-Würfe werden mit zurückgenommen, bis wieder ein Mensch dran ist.
   void _undo() {
+    if (!_canUndo) return;
     _botTimer?.cancel();
     setState(() {
       _match.undo();
@@ -166,11 +240,12 @@ class _GameScreenState extends State<GameScreen> {
       }
       _message = null;
     });
+    _sync();
     _scheduleBot();
   }
 
   void _nextPlayer() {
-    if (_game.isOver) return;
+    if (!_inputAllowed) return;
     final player = _game.currentPlayer;
     final turn = _game.currentTurn;
     _game.nextPlayer();
@@ -206,6 +281,7 @@ class _GameScreenState extends State<GameScreen> {
       _game.correctDart(index, hit);
       _message = 'Korrigiert: ${hit.label}';
     });
+    _sync();
     if (!wasOver && _game.isOver) {
       _onLegWon(_game.winner!);
     } else {
@@ -259,6 +335,19 @@ class _GameScreenState extends State<GameScreen> {
     _botTimer?.cancel();
     if (_match.isOver) return _onMatchWon(player);
     Speech.say('Game shot! Leg an ${_name(player)}');
+    if (_online != null) {
+      // Online ohne Dialog: kurz anzeigen, dann startet das nächste Leg für beide
+      setState(() => _message = 'Leg an ${_name(player)}');
+      _nextLegTimer = Timer(const Duration(seconds: 3), () {
+        if (!mounted || !_match.legOver) return;
+        setState(() {
+          _match.startNextLeg();
+          _message = null;
+        });
+        _sync();
+      });
+      return;
+    }
     final wins = _match.legWins;
     final action = await showDialog<String>(
       context: context,
@@ -284,6 +373,7 @@ class _GameScreenState extends State<GameScreen> {
 
   Future<void> _onMatchWon(int player) async {
     final solo = _match.players.length == 1;
+    final online = _online;
     Speech.say(solo ? 'Geschafft!' : 'Game shot and the match! ${_name(player)}');
     final action = await showDialog<String>(
       context: context,
@@ -296,9 +386,10 @@ class _GameScreenState extends State<GameScreen> {
           _legSummary(player),
         ].join('\n')),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, 'undo'), child: const Text('Rückgängig')),
+          if (_canUndo) TextButton(onPressed: () => Navigator.pop(context, 'undo'), child: const Text('Rückgängig')),
           TextButton(onPressed: () => Navigator.pop(context, 'menu'), child: const Text('Menü')),
-          FilledButton(onPressed: () => Navigator.pop(context, 'rematch'), child: const Text('Revanche')),
+          if (online == null)
+            FilledButton(onPressed: () => Navigator.pop(context, 'rematch'), child: const Text('Revanche')),
         ],
       ),
     );
@@ -306,6 +397,11 @@ class _GameScreenState extends State<GameScreen> {
     if (action == 'undo') return _undo();
     // Erst beim Verlassen speichern – "Rückgängig" soll kein halbes Match in die Historie schreiben
     await (await LocalStore.instance()).saveMatch(_match);
+    // In die Cloud-Historie (online lädt nur der Gastgeber hoch, sonst gäbe es das Match doppelt)
+    if (online == null || online.isMine(0)) {
+      final backend = await Backend.instance();
+      unawaited(backend.uploadMatch(_match).catchError((_) {}));
+    }
     if (!mounted) return;
     if (action == 'rematch') {
       _restart();
@@ -329,13 +425,13 @@ class _GameScreenState extends State<GameScreen> {
   // ---------------------------------------------------------------- Kamera
 
   void _onDetected(Hit hit, Offset tip) {
-    if (!mounted || _game.isOver || _botTurn) return;
+    if (!mounted || !_inputAllowed) return;
     _onHit(hit);
   }
 
   /// Darts wurden gezogen. Stecken weniger als 3 in der Aufnahme, gingen die übrigen daneben.
   void _onCleared() {
-    if (!mounted || _game.isOver || _botTurn) return;
+    if (!mounted || !_inputAllowed) return;
     final turn = _game.currentTurn;
     if (turn.darts.isNotEmpty && !turn.finished) _nextPlayer();
   }
@@ -419,7 +515,7 @@ class _GameScreenState extends State<GameScreen> {
     final live = _live;
     final x01 = _x01;
     final totalInput = x01 != null && _inputMode == InputMode.turnTotal && live == null;
-    final inputEnabled = !game.isOver && !_botTurn;
+    final inputEnabled = _inputAllowed;
     final subtitle = [
       ?game.subtitle,
       if (_match.settings.bestOf > 1) 'Leg ${_match.legs.length} · Best of ${_match.settings.bestOf}',
@@ -451,12 +547,12 @@ class _GameScreenState extends State<GameScreen> {
             icon: const Icon(Icons.videocam_off_outlined),
             selectedIcon: const Icon(Icons.videocam),
           ),
-          IconButton(tooltip: 'Rückgängig', onPressed: _match.canUndo ? _undo : null, icon: const Icon(Icons.undo)),
+          IconButton(tooltip: 'Rückgängig', onPressed: _canUndo ? _undo : null, icon: const Icon(Icons.undo)),
           PopupMenuButton<String>(
             onSelected: (v) => v == 'speech' ? _toggleSpeech() : _restart(),
             itemBuilder: (context) => [
               CheckedPopupMenuItem(value: 'speech', checked: Speech.enabled, child: const Text('Sprachansage')),
-              const PopupMenuItem(value: 'restart', child: Text('Neu starten')),
+              if (_online == null) const PopupMenuItem(value: 'restart', child: Text('Neu starten')),
             ],
           ),
         ],
@@ -484,7 +580,8 @@ class _GameScreenState extends State<GameScreen> {
                     SizedBox(
                       height: 28,
                       child: _InfoLine(
-                        text: _message ?? (_botTurn ? '${_name(game.currentPlayer)} wirft …' : game.hint),
+                        text: _message ??
+                            ((_botTurn || !_myTurn) && !game.isOver ? '${_name(game.currentPlayer)} wirft …' : game.hint),
                         highlight: _message != null,
                       ),
                     ),

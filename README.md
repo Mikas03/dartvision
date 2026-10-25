@@ -23,6 +23,7 @@ dart/
 │   ├── evaluate.py      Erkennung gegen bekannte Ergebnisse messen
 │   └── __main__.py      Kommandozeile (calibrate / play / synth / evaluate)
 ├── tests/               pytest-Tests für Scoring, Spiel und Kalibrierung
+├── server/              PocketBase-Server: Accounts, Cloud-Historie, Online-Spiele (siehe server/README.md)
 ├── app/                 Flutter-App (Zähler, später mit Kamera)
 │   ├── lib/models/      Hit, X01-Spiellogik, Checkout-Vorschläge
 │   ├── lib/screens/     Spiel einrichten, Spielbildschirm
@@ -116,6 +117,12 @@ höchster Checkout, Cricket-MPR, Verlauf des Averages).
 **Eingabe:** einzelne Darts, Gesamtpunktzahl (nur X01) oder Kamera. **Sprachansage** über das
 Menü im Spiel.
 
+**Online (eigener Server):** Tab „Online“ → Server-Adresse eintragen, Account anlegen. Dann
+Online-Spiel erstellen und den 5-stelligen Code an den Gegner schicken; jeder spielt an seiner
+eigenen Scheibe (Tastenfeld, Summe oder Kamera), die Würfe werden live übertragen. Beendete
+Matches landen in der Cloud-Historie und sind auf jedem Gerät des Accounts verfügbar.
+Server einrichten (lokal oder auf dem Raspberry Pi): [server/README.md](server/README.md).
+
 **Aufbau:** `lib/models/dart_game.dart` ist die gemeinsame Grundlage aller Modi (Aufnahmen,
 Rückgängig, Korrektur, Speichern/Nachspielen). Ein Match (`match.dart`) lässt sich vollständig
 als JSON speichern und wiederherstellen – dieses Format ist auch für Accounts und Online-Spiele
@@ -189,4 +196,5 @@ automatisch eingetragen; das Display bleibt dabei an.
 - [x] Erkennung im Spiel: erkannte Darts landen im Zähler, Korrektur per Antippen
 - [ ] Mit echter Kamera testen und Erkennung nachschärfen
 - [x] Weitere Spielmodi, Legs, Dartbot, Spielerprofile, Historie, Statistik, Sprachansage
-- [ ] Accounts und Online-Spiele (Cloud-Dienst wählen: z. B. Firebase oder Supabase)
+- [x] Accounts, Cloud-Historie und Online-Spiele über eigenen PocketBase-Server
+- [ ] Server auf dem Raspberry Pi mit Cloudflare Tunnel (HTTPS) einrichten

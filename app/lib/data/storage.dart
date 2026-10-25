@@ -38,9 +38,9 @@ class MatchRecord {
     required this.matchJson,
   });
 
-  factory MatchRecord.fromMatch(Match match) => MatchRecord(
+  factory MatchRecord.fromMatch(Match match, {DateTime? finishedAt}) => MatchRecord(
         id: match.id,
-        finishedAt: DateTime.now(),
+        finishedAt: finishedAt ?? DateTime.now(),
         mode: match.settings.mode,
         description: match.description,
         players: match.players,
@@ -131,6 +131,18 @@ class LocalStore {
     return profile;
   }
 
+  /// Legt ein Profil mit fester ID an (z. B. für den Account) oder aktualisiert dessen Namen.
+  Future<void> ensureProfile(String id, String name) async {
+    final list = profiles;
+    final index = list.indexWhere((p) => p.id == id);
+    if (index >= 0) {
+      if (list[index].name != name) list[index] = list[index].copyWith(name: name);
+    } else {
+      list.insert(0, PlayerProfile(id: id, name: name, createdAt: DateTime.now()));
+    }
+    await _saveProfiles(list);
+  }
+
   Future<void> renameProfile(String id, String name) =>
       _saveProfiles([for (final p in profiles) p.id == id ? p.copyWith(name: name.trim()) : p]);
 
@@ -154,9 +166,10 @@ class LocalStore {
     return records;
   }
 
-  Future<void> saveMatch(Match match) async {
-    final records = [MatchRecord.fromMatch(match), ...history.where((r) => r.id != match.id)].take(maxHistory);
-    await _prefs.setString(_historyKey, jsonEncode([for (final r in records) r.toJson()]));
+  Future<void> saveMatch(Match match, {DateTime? finishedAt}) async {
+    final records = [MatchRecord.fromMatch(match, finishedAt: finishedAt), ...history.where((r) => r.id != match.id)]
+      ..sort((a, b) => b.finishedAt.compareTo(a.finishedAt));
+    await _prefs.setString(_historyKey, jsonEncode([for (final r in records.take(maxHistory)) r.toJson()]));
   }
 
   Future<void> deleteMatch(String id) async {

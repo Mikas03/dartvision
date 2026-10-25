@@ -8,3 +8,8 @@ data/images/*
 !data/videos/.gitkeep
 !data/images/.gitkeep
 .claude/
+
+# PocketBase: Programm und lokale Datenbank nicht ins Repository
+server/bin/
+server/pb_data/
+server/.env*

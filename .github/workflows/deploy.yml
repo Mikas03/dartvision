@@ -28,6 +28,27 @@ jobs:
       - run: pip install opencv-python-headless numpy pytest && pip install -e . --no-deps
       - run: pytest -q
 
+  server:
+    name: Server-Regeln prüfen
+    runs-on: ubuntu-latest
+    env:
+      PB_VERSION: 0.40.6
+      PB_SHA256: 0e1f609158ed945f809f8a02ae012aa0427129c66ebb63c1aee76f2c0309373f
+    steps:
+      - uses: actions/checkout@v4
+      - name: PocketBase laden (mit Prüfsumme)
+        run: |
+          curl -sSL -o pb.zip "https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/pocketbase_${PB_VERSION}_linux_amd64.zip"
+          echo "${PB_SHA256}  pb.zip" | sha256sum -c
+          unzip -q pb.zip pocketbase
+      - name: Datenbank anlegen und Server starten
+        run: |
+          ./pocketbase migrate up --dir=pb_data --migrationsDir=server/pb_migrations
+          ./pocketbase serve --http=127.0.0.1:8090 --dir=pb_data --migrationsDir=server/pb_migrations &
+          for i in $(seq 1 20); do curl -sf http://127.0.0.1:8090/api/health && break; sleep 0.5; done
+      - name: Zugriffsregeln prüfen
+        run: python3 server/test_rules.py
+
   app:
     name: App testen und bauen
     runs-on: ubuntu-latest
@@ -52,7 +73,7 @@ jobs:
   deploy:
     name: Auf GitHub Pages veröffentlichen
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: [python, app]
+    needs: [python, server, app]
     runs-on: ubuntu-latest
     environment:
       name: github-pages

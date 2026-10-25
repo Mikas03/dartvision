@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'screens/history_screen.dart';
+import 'screens/online_screen.dart';
 import 'screens/profiles_screen.dart';
 import 'screens/setup_screen.dart';
 
@@ -24,7 +25,7 @@ class DartApp extends StatelessWidget {
   }
 }
 
-/// Startseite mit drei Bereichen: Spielen, Historie, Spieler.
+/// Startseite mit vier Bereichen: Spielen, Historie, Spieler, Online.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -53,6 +54,7 @@ class _HomeScreenState extends State<HomeScreen> {
           const SetupScreen(),
           HistoryScreen(key: _historyKey),
           ProfilesScreen(key: _profilesKey),
+          const OnlineScreen(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -62,6 +64,7 @@ class _HomeScreenState extends State<HomeScreen> {
           NavigationDestination(icon: Icon(Icons.sports_esports_outlined), label: 'Spielen'),
           NavigationDestination(icon: Icon(Icons.history), label: 'Historie'),
           NavigationDestination(icon: Icon(Icons.people_outline), label: 'Spieler'),
+          NavigationDestination(icon: Icon(Icons.public), label: 'Online'),
         ],
       ),
     );
