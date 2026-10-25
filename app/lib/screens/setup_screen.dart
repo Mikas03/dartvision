@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/x01_game.dart';
 import 'camera_screen.dart';
@@ -18,6 +19,28 @@ class _SetupScreenState extends State<SetupScreen> {
   ];
   int _startScore = 501;
   bool _doubleOut = true;
+  InputMode _inputMode = InputMode.perDart;
+
+  static const _inputModeKey = 'input_mode';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadInputMode();
+  }
+
+  /// Die zuletzt gewählte Eingabeart wieder vorauswählen.
+  Future<void> _loadInputMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = InputMode.values.asNameMap()[prefs.getString(_inputModeKey)];
+    if (saved != null && mounted) setState(() => _inputMode = saved);
+  }
+
+  Future<void> _setInputMode(InputMode mode) async {
+    setState(() => _inputMode = mode);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_inputModeKey, mode.name);
+  }
 
   @override
   void dispose() {
@@ -43,6 +66,7 @@ class _SetupScreenState extends State<SetupScreen> {
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => GameScreen(
         createGame: () => X01Game(players: players, startScore: _startScore, doubleOut: _doubleOut),
+        inputMode: _inputMode,
       ),
     ));
   }
@@ -121,6 +145,32 @@ class _SetupScreenState extends State<SetupScreen> {
                   subtitle: const Text('Zum Beenden muss ein Doppel getroffen werden'),
                   value: _doubleOut,
                   onChanged: (v) => setState(() => _doubleOut = v),
+                ),
+                const SizedBox(height: 16),
+                Text('Eingabe', style: theme.textTheme.titleMedium),
+                const SizedBox(height: 8),
+                SegmentedButton<InputMode>(
+                  segments: const [
+                    ButtonSegment(
+                      value: InputMode.perDart,
+                      icon: Icon(Icons.apps),
+                      label: Text('Einzelne Darts'),
+                    ),
+                    ButtonSegment(
+                      value: InputMode.turnTotal,
+                      icon: Icon(Icons.pin_outlined),
+                      label: Text('Gesamtpunktzahl'),
+                    ),
+                  ],
+                  selected: {_inputMode},
+                  onSelectionChanged: (s) => _setInputMode(s.first),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _inputMode == InputMode.perDart
+                      ? 'Jeden Dart einzeln eintragen, z. B. T20 · T20 · 5 – oder per Kamera.'
+                      : 'Nur die Summe der Aufnahme eintragen, z. B. 125.',
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                 ),
                 const SizedBox(height: 24),
                 FilledButton.icon(

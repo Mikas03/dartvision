@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/hit.dart';
+import 'button_grid.dart';
 
 /// Tastenfeld zur manuellen Eingabe (und später zur Korrektur erkannter Würfe).
 class InputPad extends StatefulWidget {
@@ -39,43 +40,24 @@ class _InputPadState extends State<InputPad> {
           onSelectionChanged: enabled ? (s) => setState(() => _multiplier = s.first) : null,
         ),
         const SizedBox(height: 8),
-        GridView.count(
-          crossAxisCount: 5,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 6,
-          crossAxisSpacing: 6,
-          childAspectRatio: 1.6,
+        ButtonGrid(
+          columns: 5,
           children: [
             for (var n = 1; n <= 20; n++)
-              _PadButton(
-                label: n.toString(),
-                onPressed: enabled ? () => _emit(Hit(n, _multiplier)) : null,
-              ),
+              _PadButton(label: n.toString(), onPressed: enabled ? () => _emit(Hit(n, _multiplier)) : null),
           ],
         ),
         const SizedBox(height: 6),
-        Row(
+        ButtonGrid(
+          columns: 3,
           children: [
-            Expanded(
-              child: _PadButton(
-                label: '25',
-                // Triple-Bull gibt es nicht, Double + 25 ist das Bull
-                onPressed: enabled && _multiplier < 3
-                    ? () => _emit(_multiplier == 2 ? Hit.bull : Hit.outerBull)
-                    : null,
-              ),
+            _PadButton(
+              label: '25',
+              // Triple-Bull gibt es nicht, Double + 25 ist das Bull
+              onPressed: enabled && _multiplier < 3 ? () => _emit(_multiplier == 2 ? Hit.bull : Hit.outerBull) : null,
             ),
-            const SizedBox(width: 6),
-            Expanded(child: _PadButton(label: 'Bull', onPressed: enabled ? () => _emit(Hit.bull) : null)),
-            const SizedBox(width: 6),
-            Expanded(
-              child: _PadButton(
-                label: 'Miss',
-                onPressed: enabled ? () => _emit(Hit.miss) : null,
-                subtle: true,
-              ),
-            ),
+            _PadButton(label: 'Bull', onPressed: enabled ? () => _emit(Hit.bull) : null),
+            _PadButton(label: 'Miss', onPressed: enabled ? () => _emit(Hit.miss) : null, subtle: true),
           ],
         ),
       ],

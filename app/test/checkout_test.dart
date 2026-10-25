@@ -40,4 +40,13 @@ void main() {
   test('Single Out darf auf allem enden', () {
     expect(suggestCheckout(57, darts: 1, doubleOut: false), [const Hit.triple(19)]);
   });
+
+  test('mögliche Summen einer Aufnahme', () {
+    for (final s in [0, 1, 26, 60, 100, 140, 170, 177, 180]) {
+      expect(isPossibleScore(s), isTrue, reason: '$s');
+    }
+    for (final s in [163, 166, 169, 172, 173, 175, 176, 178, 179, 181, -1]) {
+      expect(isPossibleScore(s), isFalse, reason: '$s');
+    }
+  });
 }

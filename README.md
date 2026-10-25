@@ -100,8 +100,14 @@ C:\Users\mikas\flutter\bin\flutter test
 C:\Users\mikas\flutter\bin\flutter run -d chrome
 ```
 
-Aktuell: X01 (301/501/701), Single/Double Out, beliebig viele Spieler, Eingabe per Tastenfeld,
-Rückgängig auch über Aufnahmen hinweg, Checkout-Vorschläge, Average. Die Kamera-Erkennung soll
+Aktuell: X01 (301/501/701), Single/Double Out, beliebig viele Spieler, Rückgängig auch über
+Aufnahmen hinweg, Checkout-Vorschläge, Average. Zwei Eingabearten (beim Start wählbar, im Spiel
+umschaltbar, die Wahl wird gemerkt):
+
+- **Einzelne Darts:** Feld und Single/Double/Triple antippen (so zählt auch die Kamera).
+- **Gesamtpunktzahl:** nur die Summe der Aufnahme eintippen oder per Schnelltaste (26, 45, 60,
+  100, 140, 180 …). Unmögliche Summen (z. B. 179) werden abgelehnt, Bust erkennt die App. Beim
+  Checkout („Rest“) fragt sie nach der Anzahl Darts, damit der Average stimmt. Die Kamera-Erkennung soll
 später dieselbe Methode `X01Game.throwDart()` aufrufen wie das Tastenfeld.
 
 ## Kamera in der App (iPhone)

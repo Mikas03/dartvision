@@ -8,14 +8,18 @@ import '../vision/live_detection.dart';
 import '../widgets/board_overlay.dart';
 import '../widgets/input_pad.dart';
 import '../widgets/live_preview.dart';
+import '../widgets/score_pad.dart';
 import '../widgets/scoreboard.dart';
 import 'camera_screen.dart';
 
 class GameScreen extends StatefulWidget {
-  const GameScreen({super.key, required this.createGame});
+  const GameScreen({super.key, required this.createGame, this.inputMode = InputMode.perDart});
 
   /// Erzeugt ein frisches Spiel (auch für "Revanche").
   final X01Game Function() createGame;
+
+  /// Eingabeart zu Beginn; lässt sich im Spiel umschalten.
+  final InputMode inputMode;
 
   @override
   State<GameScreen> createState() => _GameScreenState();
@@ -23,6 +27,7 @@ class GameScreen extends StatefulWidget {
 
 class _GameScreenState extends State<GameScreen> {
   late X01Game _game = widget.createGame();
+  late InputMode _inputMode = widget.inputMode;
   String? _message;
 
   /// Läuft, solange die Kamera die Darts zählt.
@@ -53,24 +58,86 @@ class _GameScreenState extends State<GameScreen> {
     if (result == ThrowResult.win) _showWinner(player);
   }
 
+  /// Eingabe der Gesamtpunktzahl. Liefert eine Fehlermeldung für das Zahlenfeld oder null.
+  Future<String?> _onTotal(int score) async {
+    if (_game.isOver) return null;
+    final player = _game.currentPlayer;
+    var darts = dartsPerTurn;
+    if (score == _game.remaining(player) && score > 0) {
+      // Checkout: mit wie vielen Darts? (für den Average) – nur mögliche Anzahlen anbieten
+      final options = [
+        for (var n = 1; n <= dartsPerTurn; n++)
+          if (suggestCheckout(score, darts: n, doubleOut: _game.doubleOut) != null) n,
+      ];
+      if (options.isEmpty) return '$score lässt sich nicht auschecken';
+      if (options.length == 1) {
+        darts = options.single;
+      } else {
+        final chosen = await _askCheckoutDarts(score, options);
+        if (chosen == null || !mounted) return null;
+        darts = chosen;
+      }
+    }
+
+    final ThrowResult result;
+    try {
+      result = _game.enterTurnTotal(score, darts: darts);
+    } on ArgumentError catch (e) {
+      return e.message as String;
+    }
+    setState(() {
+      _message = switch (result) {
+        ThrowResult.bust => 'Bust!',
+        ThrowResult.win => null,
+        _ when score == 180 => 'Hundertachtzig!',
+        _ => '${_game.players[player]}: $score',
+      };
+    });
+    if (result == ThrowResult.win) _showWinner(player);
+    return null;
+  }
+
+  Future<int?> _askCheckoutDarts(int score, List<int> options) {
+    return showDialog<int>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Checkout $score'),
+        content: const Text('Mit wie vielen Darts?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Abbrechen')),
+          for (final n in options) FilledButton.tonal(onPressed: () => Navigator.pop(context, n), child: Text('$n')),
+        ],
+      ),
+    );
+  }
+
+  void _toggleInputMode() => setState(() {
+    _inputMode = _inputMode == InputMode.perDart ? InputMode.turnTotal : InputMode.perDart;
+  });
+
   void _undo() => setState(() {
-        _game.undo();
-        _message = null;
-      });
+    _game.undo();
+    _message = null;
+  });
 
   void _nextPlayer() => setState(() {
-        _game.nextPlayer();
-        _message = null;
-      });
+    _game.nextPlayer();
+    _message = null;
+  });
 
   void _restart() => setState(() {
-        _game = widget.createGame();
-        _message = null;
-      });
+    _game = widget.createGame();
+    _message = null;
+  });
 
   Future<void> _correct(int index) async {
     final turn = _game.correctableTurn;
     if (turn == null) return;
+    if (turn.isTotal) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Eingegebene Summe ändern: Rückgängig und neu eingeben')));
+      return;
+    }
     final hit = await _pickHit('Dart ${index + 1} korrigieren (erkannt: ${turn.darts[index].label})');
     if (hit == null || !mounted) return;
     final wasOver = _game.isOver;
@@ -171,8 +238,10 @@ class _GameScreenState extends State<GameScreen> {
         builder: (context) => AlertDialog(
           icon: const Icon(Icons.videocam_outlined),
           title: const Text('Kamera noch nicht eingerichtet'),
-          content: const Text('Stell das Handy fest auf und kalibriere die Scheibe einmal. '
-              'Oder probier die Erkennung mit der Demo-Szene aus.'),
+          content: const Text(
+            'Stell das Handy fest auf und kalibriere die Scheibe einmal. '
+            'Oder probier die Erkennung mit der Demo-Szene aus.',
+          ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(context), child: const Text('Abbrechen')),
             TextButton(onPressed: () => Navigator.pop(context, 'demo'), child: const Text('Demo-Szene')),
@@ -220,8 +289,23 @@ class _GameScreenState extends State<GameScreen> {
     final live = _live;
     return Scaffold(
       appBar: AppBar(
-        title: Text('${game.startScore}${game.doubleOut ? ' · Double Out' : ''}'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('${game.startScore}'),
+            if (game.doubleOut) Text('Double Out', style: Theme.of(context).textTheme.bodySmall),
+          ],
+        ),
         actions: [
+          if (live == null)
+            IconButton(
+              tooltip: _inputMode == InputMode.perDart
+                  ? 'Eingabe: einzelne Darts (umschalten auf Gesamtpunktzahl)'
+                  : 'Eingabe: Gesamtpunktzahl (umschalten auf einzelne Darts)',
+              onPressed: _toggleInputMode,
+              icon: Icon(_inputMode == InputMode.perDart ? Icons.apps : Icons.pin_outlined),
+            ),
           IconButton(
             tooltip: live == null ? 'Mit Kamera zählen' : 'Kamera aus',
             onPressed: _toggleCamera,
@@ -229,11 +313,7 @@ class _GameScreenState extends State<GameScreen> {
             icon: const Icon(Icons.videocam_off_outlined),
             selectedIcon: const Icon(Icons.videocam),
           ),
-          IconButton(
-            tooltip: 'Rückgängig',
-            onPressed: game.canUndo ? _undo : null,
-            icon: const Icon(Icons.undo),
-          ),
+          IconButton(tooltip: 'Rückgängig', onPressed: game.canUndo ? _undo : null, icon: const Icon(Icons.undo)),
           IconButton(tooltip: 'Neu starten', onPressed: _restart, icon: const Icon(Icons.refresh)),
         ],
       ),
@@ -241,47 +321,72 @@ class _GameScreenState extends State<GameScreen> {
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 520),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Scoreboard(game: game),
-                  const SizedBox(height: 12),
-                  _TurnRow(game: game, onTapDart: _correct),
-                  const SizedBox(height: 6),
-                  _InfoLine(game: game, message: _message),
-                  if (live == null) ...[
-                    const Spacer(),
-                    InputPad(onHit: _onHit, enabled: !game.isOver),
-                  ] else ...[
-                    const SizedBox(height: 8),
-                    Expanded(child: _buildCamera(live)),
-                  ],
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      if (live != null) ...[
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: game.isOver ? null : _manualDart,
-                            icon: const Icon(Icons.dialpad),
-                            label: const Text('Eintragen'),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // Auf kleinen Bildschirmen (z. B. iPhone SE im Browser) scrollen statt abschneiden
+                final compact = live == null && constraints.maxHeight < 640;
+                final column = Column(
+                  mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Scoreboard(game: game),
+                    // Bei der Gesamtpunktzahl gibt es keine einzelnen Darts; die letzte Aufnahme steht in der Punktetafel
+                    if (live != null || _inputMode == InputMode.perDart) ...[
+                      const SizedBox(height: 12),
+                      _TurnRow(game: game, onTapDart: _correct),
+                    ] else
+                      const SizedBox(height: 8),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      height: 28,
+                      child: _InfoLine(game: game, message: _message),
+                    ),
+                    if (live == null) ...[
+                      compact ? const SizedBox(height: 8) : const Spacer(),
+                      if (_inputMode == InputMode.perDart)
+                        InputPad(onHit: _onHit, enabled: !game.isOver)
+                      else
+                        ScorePad(
+                          onSubmit: _onTotal,
+                          enabled: !game.isOver && game.currentTurn.darts.isEmpty,
+                          disabledHint: game.isOver ? null : 'Erst die angefangene Aufnahme beenden',
+                          remaining: game.isOver ? null : game.remaining(game.currentPlayer),
+                        ),
+                    ] else ...[
+                      const SizedBox(height: 8),
+                      Expanded(child: _buildCamera(live)),
+                    ],
+                    if (live != null || _inputMode == InputMode.perDart) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          if (live != null) ...[
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: game.isOver ? null : _manualDart,
+                                icon: const Icon(Icons.dialpad),
+                                label: const Text('Eintragen'),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                          ],
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: game.isOver || game.currentTurn.darts.isEmpty ? null : _nextPlayer,
+                              icon: const Icon(Icons.skip_next),
+                              label: const Text('Aufnahme beenden'),
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                      ],
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: game.isOver || game.currentTurn.darts.isEmpty ? null : _nextPlayer,
-                          icon: const Icon(Icons.skip_next),
-                          label: const Text('Aufnahme beenden'),
-                        ),
+                        ],
                       ),
                     ],
-                  ),
-                ],
-              ),
+                  ],
+                );
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+                  child: compact ? SingleChildScrollView(child: column) : column,
+                );
+              },
             ),
           ),
         ),
@@ -353,61 +458,82 @@ class _TurnRow extends StatelessWidget {
     final turn = game.correctableTurn ?? game.currentTurn;
     final previous = !identical(turn, game.currentTurn);
     final darts = turn.darts;
+    final total = turn.total;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (previous)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: Text(
-              'Letzte Aufnahme: ${game.players[turn.player]}${turn.bust ? ' (Bust)' : ''} – antippen zum Korrigieren',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-            ),
-          ),
+        SizedBox(
+          height: 20,
+          child: !previous
+              ? null
+              : Text(
+                  'Letzte Aufnahme: ${game.players[turn.player]}${turn.bust ? ' (Bust)' : ''}'
+                  '${turn.isTotal ? '' : ' – antippen zum Korrigieren'}',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                  overflow: TextOverflow.ellipsis,
+                ),
+        ),
         Row(
           children: [
-            for (var i = 0; i < dartsPerTurn; i++) ...[
-              if (i > 0) const SizedBox(width: 6),
+            if (total != null)
               Expanded(
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
+                child: Container(
+                  height: 44,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: scheme.outlineVariant),
                     borderRadius: BorderRadius.circular(10),
-                    onTap: i < darts.length ? () => onTapDart(i) : null,
-                    child: Ink(
-                      height: 44,
-                      decoration: BoxDecoration(
-                        border: Border.all(color: scheme.outlineVariant),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Center(
-                        child: Text(
-                          i < darts.length ? darts[i].label : '–',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w500,
-                            color: i >= darts.length
-                                ? scheme.outline
-                                : previous
-                                    ? scheme.onSurfaceVariant
-                                    : scheme.onSurface,
+                  ),
+                  child: Text(
+                    turn.finished && !turn.bust && game.winner == turn.player
+                        ? 'Checkout mit ${turn.totalDarts} ${turn.totalDarts == 1 ? 'Dart' : 'Darts'}'
+                        : 'Gesamtpunktzahl eingegeben',
+                    style: TextStyle(color: scheme.onSurfaceVariant),
+                  ),
+                ),
+              )
+            else
+              for (var i = 0; i < dartsPerTurn; i++) ...[
+                if (i > 0) const SizedBox(width: 6),
+                Expanded(
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: i < darts.length ? () => onTapDart(i) : null,
+                      child: Ink(
+                        height: 44,
+                        decoration: BoxDecoration(
+                          border: Border.all(color: scheme.outlineVariant),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Center(
+                          child: Text(
+                            i < darts.length ? darts[i].label : '–',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w500,
+                              color: i >= darts.length
+                                  ? scheme.outline
+                                  : previous
+                                  ? scheme.onSurfaceVariant
+                                  : scheme.onSurface,
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
             const SizedBox(width: 10),
             SizedBox(
               width: 52,
               child: Text(
                 '${previous ? turn.scored : turn.thrown}',
                 textAlign: TextAlign.end,
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      color: previous ? scheme.onSurfaceVariant : null,
-                    ),
+                style: Theme.of(context).textTheme.headlineSmall
+                    ?.copyWith(color: previous ? scheme.onSurfaceVariant : null),
               ),
             ),
           ],
@@ -428,11 +554,13 @@ class _InfoLine extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     if (message != null) {
-      return Text(message!,
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500, color: scheme.primary));
+      return Text(
+        message!,
+        textAlign: TextAlign.center,
+        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500, color: scheme.primary),
+      );
     }
-    if (game.isOver) return const SizedBox(height: 24);
+    if (game.isOver) return const SizedBox();
 
     final rest = game.displayRemaining(game.currentPlayer);
     final way = suggestCheckout(rest, darts: game.dartsLeftInTurn, doubleOut: game.doubleOut);

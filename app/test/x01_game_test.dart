@@ -123,4 +123,70 @@ void main() {
       expect(game.remaining(0), 100);
     });
   });
+
+  group('Gesamtpunktzahl', () {
+    test('normale Aufnahme', () {
+      final game = X01Game(players: ['A', 'B']);
+      expect(game.enterTurnTotal(100), ThrowResult.turnOver);
+      expect(game.remaining(0), 401);
+      expect(game.currentPlayer, 1);
+      expect(game.average(0), 100);
+    });
+
+    test('unmögliche Summen werden abgelehnt', () {
+      final game = X01Game(players: ['A']);
+      for (final score in [179, 163, 181, -1]) {
+        expect(() => game.enterTurnTotal(score), throwsArgumentError, reason: '$score');
+      }
+      expect(game.remaining(0), 501);
+      expect(game.currentTurn.isTotal, isFalse);
+    });
+
+    test('Bust bei zu viel oder Rest 1', () {
+      final game = X01Game(players: ['A'], startScore: 60);
+      expect(game.enterTurnTotal(81), ThrowResult.bust);
+      expect(game.remaining(0), 60);
+      expect(game.enterTurnTotal(59), ThrowResult.bust);
+      expect(game.remaining(0), 60);
+    });
+
+    test('Checkout mit Anzahl Darts für den Average', () {
+      final game = X01Game(players: ['A'], startScore: 141);
+      game.enterTurnTotal(100); // Rest 41
+      expect(game.enterTurnTotal(41, darts: 2), ThrowResult.win);
+      expect(game.winner, 0);
+      expect(game.average(0), closeTo(141 / 5 * 3, 1e-9));
+    });
+
+    test('Checkout, der so nicht geht, wird abgelehnt', () {
+      final game = X01Game(players: ['A'], startScore: 41);
+      expect(() => game.enterTurnTotal(41, darts: 1), throwsArgumentError);
+      expect(game.isOver, isFalse);
+      expect(game.currentTurn.isTotal, isFalse);
+
+      final bogey = X01Game(players: ['A'], startScore: 169);
+      // 169 ist mit drei Darts möglich (z. B. T20 T19 Bull) – aber nicht auf ein Doppel endend
+      expect(() => bogey.enterTurnTotal(169), throwsArgumentError);
+    });
+
+    test('Rückgängig nimmt die ganze Summe zurück', () {
+      final game = X01Game(players: ['A', 'B']);
+      game.enterTurnTotal(60);
+      game.undo();
+      expect(game.currentPlayer, 0);
+      expect(game.currentTurn.isTotal, isFalse);
+      expect(game.remaining(0), 501);
+      expect(game.canUndo, isFalse);
+    });
+
+    test('gemischt mit einzelnen Darts', () {
+      final game = X01Game(players: ['A', 'B']);
+      game.enterTurnTotal(60);
+      throwAll(game, [const Hit.triple(20), const Hit.triple(20), const Hit.triple(20)]);
+      expect(game.remaining(0), 441);
+      expect(game.remaining(1), 321);
+      expect(() => game.correctDart(0, const Hit.single(1)), returnsNormally);
+      expect(game.remaining(1), 380); // 1 + 60 + 60
+    });
+  });
 }

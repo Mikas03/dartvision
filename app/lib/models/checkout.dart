@@ -54,3 +54,16 @@ List<Hit>? _twoDarts(int rest, List<Hit> finishes) {
   }
   return null;
 }
+
+/// Alle Summen, die man mit höchstens drei Darts werfen kann (0 bis 180, aber z. B. nicht 179).
+final Set<int> _possibleScores = () {
+  final values = {0, for (var s = 1; s <= 20; s++) ...[s, 2 * s, 3 * s], 25, 50};
+  return {
+    for (final a in values)
+      for (final b in values)
+        for (final c in values) a + b + c,
+  };
+}();
+
+/// Ob man [score] mit höchstens drei Darts werfen kann.
+bool isPossibleScore(int score) => _possibleScores.contains(score);

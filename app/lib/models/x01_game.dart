@@ -1,6 +1,16 @@
+import 'checkout.dart';
 import 'hit.dart';
 
 const dartsPerTurn = 3;
+
+/// Wie Würfe eingegeben werden.
+enum InputMode {
+  /// Jeder Dart einzeln (Feld und Multiplikator) – auch so arbeitet die Kamera.
+  perDart,
+
+  /// Nur die Summe der Aufnahme, z. B. 100.
+  turnTotal,
+}
 
 /// Eine Aufnahme (bis zu 3 Darts) eines Spielers.
 class Turn {
@@ -11,7 +21,18 @@ class Turn {
   bool bust = false;
   bool finished = false;
 
-  int get thrown => darts.fold(0, (sum, h) => sum + h.value);
+  /// Bei Eingabe der Gesamtpunktzahl: die Summe (die einzelnen Darts sind dann unbekannt).
+  int? total;
+
+  /// Bei Eingabe der Gesamtpunktzahl: wie viele Darts geworfen wurden (3, außer beim Checkout).
+  int totalDarts = dartsPerTurn;
+
+  bool get isTotal => total != null;
+
+  int get thrown => total ?? darts.fold(0, (sum, h) => sum + h.value);
+
+  /// Anzahl geworfener Darts (für den Average).
+  int get dartCount => isTotal ? totalDarts : darts.length;
 
   /// Punkte, die tatsächlich abgezogen werden (bei Bust 0).
   int get scored => bust ? 0 : thrown;
@@ -56,7 +77,7 @@ class X01Game {
   /// 3-Dart-Average.
   double average(int player) {
     final own = _turns.where((t) => t.player == player);
-    final darts = own.fold(0, (sum, t) => sum + t.darts.length);
+    final darts = own.fold(0, (sum, t) => sum + t.dartCount);
     if (darts == 0) return 0;
     final points = own.fold(0, (sum, t) => sum + (t.finished ? t.scored : t.thrown));
     return points / darts * dartsPerTurn;
@@ -92,6 +113,41 @@ class X01Game {
     return ThrowResult.ok;
   }
 
+  /// Trägt die Summe einer ganzen Aufnahme ein (Eingabeart [InputMode.turnTotal]).
+  ///
+  /// [darts] ist nur beim Checkout relevant (mit wie vielen Darts ausgecheckt wurde).
+  /// Wirft einen [ArgumentError] bei unmöglichen Eingaben, z. B. 179 oder einem Checkout,
+  /// der mit [darts] Darts nicht geht.
+  ThrowResult enterTurnTotal(int score, {int darts = dartsPerTurn}) {
+    if (isOver) throw StateError('Spiel ist bereits beendet');
+    if (currentTurn.darts.isNotEmpty) throw StateError('In dieser Aufnahme wurden schon einzelne Darts eingetragen');
+    if (!isPossibleScore(score)) throw ArgumentError('$score kann man mit drei Darts nicht werfen');
+
+    final rest = remaining(currentPlayer) - score;
+    final turn = currentTurn
+      ..total = score
+      ..totalDarts = dartsPerTurn;
+    if (rest < 0 || (doubleOut && rest == 1)) {
+      _finishTurn(bust: true);
+      return ThrowResult.bust;
+    }
+    if (rest == 0) {
+      if (suggestCheckout(score, darts: darts, doubleOut: doubleOut) == null) {
+        turn.total = null;
+        throw ArgumentError(darts == dartsPerTurn
+            ? '$score lässt sich nicht auschecken'
+            : '$score lässt sich nicht mit $darts ${darts == 1 ? 'Dart' : 'Darts'} auschecken');
+      }
+      turn
+        ..totalDarts = darts
+        ..finished = true;
+      _winner = currentPlayer;
+      return ThrowResult.win;
+    }
+    _finishTurn();
+    return ThrowResult.turnOver;
+  }
+
   /// Aufnahme vorzeitig beenden, z. B. wenn Darts nicht gezählt werden sollen.
   void nextPlayer() {
     if (!isOver) _finishTurn();
@@ -99,23 +155,28 @@ class X01Game {
 
   bool get canUndo => _turns.length > 1 || currentTurn.darts.isNotEmpty;
 
-  /// Nimmt den letzten Dart zurück, auch aus einer bereits beendeten Aufnahme.
+  /// Nimmt den letzten Dart zurück (bzw. die zuletzt eingegebene Gesamtpunktzahl),
+  /// auch aus einer bereits beendeten Aufnahme.
   void undo() {
     if (!canUndo) return;
-    if (currentTurn.darts.isEmpty && !currentTurn.finished) {
+    if (currentTurn.darts.isEmpty && !currentTurn.isTotal && !currentTurn.finished) {
       _turns.removeLast();
     }
     _winner = null;
     final turn = currentTurn
       ..finished = false
       ..bust = false;
-    if (turn.darts.isNotEmpty) turn.darts.removeLast();
+    if (turn.isTotal) {
+      turn.total = null;
+    } else if (turn.darts.isNotEmpty) {
+      turn.darts.removeLast();
+    }
   }
 
   /// Aufnahme, deren Darts angezeigt und korrigiert werden können: die laufende,
   /// oder – solange darin noch kein Dart ist – die vorige.
   Turn? get correctableTurn {
-    if (currentTurn.darts.isNotEmpty) return currentTurn;
+    if (currentTurn.darts.isNotEmpty || currentTurn.isTotal) return currentTurn;
     if (_turns.length > 1) return _turns[_turns.length - 2];
     return null;
   }
@@ -124,6 +185,9 @@ class X01Game {
   /// (z. B. wenn die Kamera ein Feld falsch erkannt hat).
   void correctDart(int index, Hit hit) {
     final turn = correctableTurn;
+    if (turn != null && turn.isTotal) {
+      throw StateError('Bei eingegebener Gesamtpunktzahl gibt es keine einzelnen Darts');
+    }
     if (turn == null || index < 0 || index >= turn.darts.length) {
       throw RangeError('Kein Dart $index zum Korrigieren');
     }
