@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+calibration.json
+data/videos/*
+data/images/*
+!data/videos/.gitkeep
+!data/images/.gitkeep
+.claude/

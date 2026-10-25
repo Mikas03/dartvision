@@ -1,0 +1,123 @@
+# dartvision
+
+Automatischer Dartzähler mit **einer** Kamera (Handy oder Webcam). Erst als Python-Prototyp am PC,
+später als Handy-App.
+
+## Projektstruktur
+
+```
+dart/
+├── src/dartvision/
+│   ├── board.py         Scheibengeometrie, Punkte aus Position (mm) berechnen
+│   ├── calibration.py   Homographie: Kamerabild (px) <-> Scheibe (mm)
+│   ├── detection.py     Darterkennung per Differenzbild + Spitzenschätzung
+│   ├── game.py          X01-Spiellogik (501, Double-Out, Bust, Undo)
+│   ├── overlay.py       Raster, Treffer und Spielstand ins Bild zeichnen
+│   ├── synthetic.py     Testvideos mit virtueller Kamera und bekannten Ergebnissen
+│   ├── evaluate.py      Erkennung gegen bekannte Ergebnisse messen
+│   └── __main__.py      Kommandozeile (calibrate / play / synth / evaluate)
+├── tests/               pytest-Tests für Scoring, Spiel und Kalibrierung
+├── app/                 Flutter-App (Zähler, später mit Kamera)
+│   ├── lib/models/      Hit, X01-Spiellogik, Checkout-Vorschläge
+│   ├── lib/screens/     Spiel einrichten, Spielbildschirm
+│   ├── lib/widgets/     Tastenfeld, Punktetafel
+│   └── test/            Tests für Logik und Oberfläche
+└── data/
+    ├── videos/          eigene Testaufnahmen (nicht im Git)
+    └── images/          Standbilder, z. B. für späteres ML-Training
+```
+
+## Einrichten
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+pip install -e ".[dev]"
+pytest
+```
+
+## Benutzung
+
+**1. Kalibrieren:** Kamera fest aufstellen, dann im Standbild die Außenkante des Doppelrings
+jeweils in der Mitte der Felder **20, 6, 3, 11** anklicken (oben, rechts, unten, links).
+Das eingeblendete Raster muss auf der Scheibe liegen, dann mit `s` speichern.
+
+```bash
+python -m dartvision calibrate --source 0
+```
+
+**2. Spielen:**
+
+```bash
+python -m dartvision play --source 0 --players Anna Ben --grid
+```
+
+`--source` ist ein Kameraindex (`0`, `1`, ...) oder eine Videodatei. Das Handy kann man z. B. per
+DroidCam / Iriun als Webcam nutzen oder einfach Videos aufnehmen und in `data/videos/` legen.
+
+| Taste / Maus | Funktion |
+|---|---|
+| Linksklick | Dart manuell an dieser Stelle eintragen (Korrektur) |
+| `u` | letzten Dart der Aufnahme zurücknehmen |
+| `n` | Aufnahme beenden / nächster Spieler |
+| `r` | Scheibe ist leer: Referenzbild neu setzen (z. B. nach Lichtänderung) |
+| `g` | Raster ein/aus |
+| Leertaste | Pause (bei Videodateien) |
+| `q` | beenden |
+
+## Testen ohne Dartboard
+
+`synth` erzeugt ein Video mit virtueller Kamera, gezeichneter Scheibe und 3D-Darts. Zu jedem
+Dart wird die echte Einstichstelle gespeichert, `evaluate` misst damit die Erkennung.
+
+```bash
+python -m dartvision synth --out data/videos/synth.mp4 --turns 20
+python -m dartvision evaluate --video data/videos/synth.mp4
+python -m dartvision play --source data/videos/synth.mp4 --calibration data/videos/synth.calibration.json --grid
+```
+
+Nützliche Stellschrauben für `synth`: `--yaw` / `--pitch` (Kamerawinkel), `--distance`,
+`--noise`, `--no-shadows`, `--seed`. Mit `evaluate --calib-noise 3` simuliert man, dass die
+Kalibrierpunkte um ein paar Pixel daneben angeklickt wurden.
+
+Was synthetische Videos **nicht** abbilden: echte Darts und Flights, Reflexionen, Kamera-
+Autofokus/Belichtung, Bewegungsunschärfe, wackelndes Stativ. Gute Werte hier sind also eine
+Voraussetzung, aber noch kein Beweis für echte Videos.
+
+## Flutter-App
+
+Flutter liegt unter `C:\Users\mikas\flutter` (nicht im PATH, daher voller Pfad).
+
+```bash
+cd app
+C:\Users\mikas\flutter\bin\flutter test
+C:\Users\mikas\flutter\bin\flutter run -d chrome
+```
+
+Aktuell: X01 (301/501/701), Single/Double Out, beliebig viele Spieler, Eingabe per Tastenfeld,
+Rückgängig auch über Aufnahmen hinweg, Checkout-Vorschläge, Average. Die Kamera-Erkennung soll
+später dieselbe Methode `X01Game.throwDart()` aufrufen wie das Tastenfeld.
+
+## Wie die Erkennung funktioniert
+
+1. Ein Referenzbild der Scheibe wird gespeichert.
+2. Sobald das Bild nach einer Bewegung wieder ruhig ist, wird es mit der Referenz verglichen.
+3. Eine kleine Änderung ist ein neuer Dart. Die Hauptachse aller geänderten Pixel wird bestimmt;
+   das schmale Ende ist die Spitze, das breite der Flight.
+4. Die Spitze wird per Homographie in Scheibenkoordinaten umgerechnet → Feld + Punkte.
+5. Sieht das Bild wieder aus wie die leere Scheibe, wurden die Darts gezogen.
+   Sehr große Änderungen (Hand/Person im Bild) werden ignoriert.
+
+## Nächste Schritte
+
+- [ ] Eigene Testvideos aufnehmen, Schwellwerte in `DetectorConfig` anpassen
+- [x] Genauigkeit messen: synthetische Videos + `evaluate`
+- [ ] Schatten auf dunklen/roten Feldern besser herausfiltern (häufigster Fehler im synthetischen
+      Test: Spitze wird entlang des Schattens zu weit unten geschätzt)
+- [ ] Verdeckung durch mehrere Darts besser behandeln
+- [ ] Automatische Kalibrierung (Doppelring/Segmentdrähte selbst finden)
+- [ ] ML-Ansatz testen (YOLO-Keypoints, siehe DeepDarts-Paper und -Datensatz)
+- [ ] Weitere Spielmodi (Cricket, Around the Clock), Checkout-Vorschläge
+- [x] Flutter-App mit manueller Eingabe
+- [ ] App aufs Handy bringen (Android Studio / SDK installieren)
+- [ ] Kamera in der App: Vorschau, Kalibrierung, Erkennung (OpenCV oder TensorFlow Lite)

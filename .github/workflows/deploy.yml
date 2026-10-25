@@ -1,0 +1,62 @@
+name: Tests und Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  python:
+    name: Python-Prototyp testen
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # headless-Variante von OpenCV, da auf dem Server kein Bildschirm vorhanden ist
+      - run: pip install opencv-python-headless numpy pytest && pip install -e . --no-deps
+      - run: pytest -q
+
+  app:
+    name: App testen und bauen
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.8
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - run: flutter build web --release --base-href /dartvision/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: app/build/web
+
+  deploy:
+    name: Auf GitHub Pages veröffentlichen
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: [python, app]
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
