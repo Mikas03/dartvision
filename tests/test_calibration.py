@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 
 from dartvision.calibration import Calibration
@@ -25,3 +27,17 @@ def test_find_tip_picks_narrow_end():
     tip = DartDetector().find_tip(mask)
     assert tip is not None
     assert abs(tip[0] - 50) < 5 and abs(tip[1] - 100) < 5
+
+
+def test_load_app_export(tmp_path):
+    # Format, das die App unter "Kalibrierung" exportiert
+    path = tmp_path / "app.calibration.json"
+    path.write_text(json.dumps({
+        "order": [20, 6, 3, 11],
+        "points_normalized": [[0.5, 0.1], [0.725, 0.5], [0.5, 0.9], [0.275, 0.5]],
+        "width": 1920,
+        "height": 1080,
+    }))
+    calib = Calibration.load(path)
+    assert calib.score_pixel(960, 540).label == "BULL"
+    assert calib.score_pixel(960, 540 - 0.4 * 1080 * 103 / 170).label == "T20"

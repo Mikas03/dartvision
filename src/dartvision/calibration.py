@@ -54,5 +54,12 @@ class Calibration:
 
     @classmethod
     def load(cls, path: str | Path) -> "Calibration":
-        data = json.loads(Path(path).read_text())
-        return cls(np.array(data["image_to_board"], dtype=np.float64))
+        """Lädt eine Kalibrierung aus dem Prototyp oder einen Export der App (normierte Punkte)."""
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        if "image_to_board" in data:
+            return cls(np.array(data["image_to_board"], dtype=np.float64))
+        if "points_normalized" in data:
+            w, h = data["width"], data["height"]
+            points = {seg: (x * w, y * h) for seg, (x, y) in zip(data["order"], data["points_normalized"])}
+            return cls.from_points(points)
+        raise ValueError(f"Unbekanntes Kalibrierformat in {path}")

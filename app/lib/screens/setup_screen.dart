@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/x01_game.dart';
+import 'camera_screen.dart';
 import 'game_screen.dart';
 
 class SetupScreen extends StatefulWidget {
@@ -50,7 +51,16 @@ class _SetupScreenState extends State<SetupScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Neues Spiel')),
+      appBar: AppBar(
+        title: const Text('Neues Spiel'),
+        actions: [
+          IconButton(
+            tooltip: 'Kamera einrichten',
+            icon: const Icon(Icons.videocam_outlined),
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CameraScreen())),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(

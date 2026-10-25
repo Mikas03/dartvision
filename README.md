@@ -104,6 +104,28 @@ Aktuell: X01 (301/501/701), Single/Double Out, beliebig viele Spieler, Eingabe p
 Rückgängig auch über Aufnahmen hinweg, Checkout-Vorschläge, Average. Die Kamera-Erkennung soll
 später dieselbe Methode `X01Game.throwDart()` aufrufen wie das Tastenfeld.
 
+## Kamera in der App (iPhone)
+
+Startbildschirm → Kamera-Symbol oben rechts. Funktioniert nur über HTTPS, also über die
+GitHub-Pages-Adresse (nicht über den lokalen Server im WLAN).
+
+1. Handy fest aufstellen (Stativ), Scheibe vollständig im Bild.
+2. Die Außenkante des Doppelrings jeweils in der Mitte der **20, 6, 3, 11** antippen.
+   Punkte lassen sich danach verschieben; das Raster muss auf der Scheibe liegen.
+3. Aufs Board tippen zeigt das Feld an dieser Stelle – so prüft man die Kalibrierung.
+4. **Aufnehmen** speichert ein Video, **Kalibrierung** die passende JSON-Datei
+   (auf dem iPhone landen beide in der Dateien-App unter „Downloads“).
+
+Ohne Kamera (z. B. am PC) gibt es den Knopf „Mit Testbild ausprobieren“.
+
+Auswerten mit dem Python-Prototyp:
+
+```bash
+python -m dartvision play --source data/videos/dart_20261025_220000.mp4 --calibration data/videos/dart_20261025_220000.calibration.json --grid
+```
+
+Die Kalibrierung wird auch im Browser gespeichert und ist beim nächsten Öffnen wieder da.
+
 ## Wie die Erkennung funktioniert
 
 1. Ein Referenzbild der Scheibe wird gespeichert.
@@ -126,4 +148,6 @@ später dieselbe Methode `X01Game.throwDart()` aufrufen wie das Tastenfeld.
 - [ ] Weitere Spielmodi (Cricket, Around the Clock), Checkout-Vorschläge
 - [x] Flutter-App mit manueller Eingabe
 - [ ] App aufs Handy bringen (Android Studio / SDK installieren)
-- [ ] Kamera in der App: Vorschau, Kalibrierung, Erkennung (OpenCV oder TensorFlow Lite)
+- [x] Kamera in der App: Vorschau, Kalibrierung, Testvideos aufnehmen
+- [ ] Echte Testvideos aufnehmen (ausgedrucktes Board + Zahnstocher reicht) und auswerten
+- [ ] Erkennung in der App (Differenzbild-Ansatz aus `detection.py` übertragen)
