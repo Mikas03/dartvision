@@ -3,6 +3,12 @@
 Automatischer Dartzähler mit **einer** Kamera (Handy oder Webcam). Erst als Python-Prototyp am PC,
 später als Handy-App.
 
+**App ausprobieren:** https://mikas03.github.io/dartvision/ (auf dem iPhone in Safari öffnen,
+dann Teilen → „Zum Home-Bildschirm“).
+
+Bei jedem Push auf `main` laufen alle Tests (Python und Flutter); sind sie grün, wird die
+Web-App automatisch neu gebaut und veröffentlicht (`.github/workflows/deploy.yml`).
+
 ## Projektstruktur
 
 ```
