@@ -100,15 +100,27 @@ C:\Users\mikas\flutter\bin\flutter test
 C:\Users\mikas\flutter\bin\flutter run -d chrome
 ```
 
-Aktuell: X01 (301/501/701), Single/Double Out, beliebig viele Spieler, Rückgängig auch über
-Aufnahmen hinweg, Checkout-Vorschläge, Average. Zwei Eingabearten (beim Start wählbar, im Spiel
-umschaltbar, die Wahl wird gemerkt):
+**Spielmodi:** X01 (301/501/701, Single/Double/Master Out, Double In), Cricket (Standard
+oder Cut-Throat), Around the Clock, Shanghai sowie die Trainingsmodi Bob's 27 und
+Checkout-Training. Alle Spielmodi außer Training als Match über mehrere Legs (Best of 3/5/7,
+Anwurf wechselt).
 
-- **Einzelne Darts:** Feld und Single/Double/Triple antippen (so zählt auch die Kamera).
-- **Gesamtpunktzahl:** nur die Summe der Aufnahme eintippen oder per Schnelltaste (26, 45, 60,
-  100, 140, 180 …). Unmögliche Summen (z. B. 179) werden abgelehnt, Bust erkennt die App. Beim
-  Checkout („Rest“) fragt sie nach der Anzahl Darts, damit der Average stimmt. Die Kamera-Erkennung soll
-später dieselbe Methode `X01Game.throwDart()` aufrufen wie das Tastenfeld.
+**Dartbot:** 10 Stufen (Ø ~21 bis ~95). Der Bot zielt wie ein Spieler (Checkout-Wege, offene
+Cricket-Zahlen …) und streut um sein Ziel; getroffen wird, was an der Stelle auf der Scheibe
+liegt. Die Streuung je Stufe ist per Simulation auf den angegebenen Average abgestimmt.
+
+**Historie und Statistik:** Beendete Matches werden mit jedem Wurf gespeichert (vorerst auf
+dem Gerät). Spielerprofile sammeln Statistiken über alle Matches (Average, First 9, 100+/140+/180,
+höchster Checkout, Cricket-MPR, Verlauf des Averages).
+
+**Eingabe:** einzelne Darts, Gesamtpunktzahl (nur X01) oder Kamera. **Sprachansage** über das
+Menü im Spiel.
+
+**Aufbau:** `lib/models/dart_game.dart` ist die gemeinsame Grundlage aller Modi (Aufnahmen,
+Rückgängig, Korrektur, Speichern/Nachspielen). Ein Match (`match.dart`) lässt sich vollständig
+als JSON speichern und wiederherstellen – dieses Format ist auch für Accounts und Online-Spiele
+gedacht (`lib/data/storage.dart` kapselt die Speicherung und kann gegen einen Cloud-Dienst
+getauscht werden).
 
 ## Kamera in der App (iPhone)
 
@@ -176,4 +188,5 @@ automatisch eingetragen; das Display bleibt dabei an.
       dass beide Versionen dasselbe Ergebnis liefern)
 - [x] Erkennung im Spiel: erkannte Darts landen im Zähler, Korrektur per Antippen
 - [ ] Mit echter Kamera testen und Erkennung nachschärfen
-- [ ] Sprachansage der Punkte
+- [x] Weitere Spielmodi, Legs, Dartbot, Spielerprofile, Historie, Statistik, Sprachansage
+- [ ] Accounts und Online-Spiele (Cloud-Dienst wählen: z. B. Firebase oder Supabase)

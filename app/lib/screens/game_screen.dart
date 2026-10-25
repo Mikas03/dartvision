@@ -1,8 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../data/storage.dart';
+import '../models/bot.dart';
 import '../models/checkout.dart';
 import '../models/hit.dart';
+import '../models/match.dart';
 import '../models/x01_game.dart';
+import '../services/speech.dart';
 import '../vision/calibration.dart';
 import '../vision/live_detection.dart';
 import '../widgets/board_overlay.dart';
@@ -13,12 +19,11 @@ import '../widgets/scoreboard.dart';
 import 'camera_screen.dart';
 
 class GameScreen extends StatefulWidget {
-  const GameScreen({super.key, required this.createGame, this.inputMode = InputMode.perDart});
+  const GameScreen({super.key, required this.match, this.inputMode = InputMode.perDart});
 
-  /// Erzeugt ein frisches Spiel (auch für "Revanche").
-  final X01Game Function() createGame;
+  final Match match;
 
-  /// Eingabeart zu Beginn; lässt sich im Spiel umschalten.
+  /// Eingabeart zu Beginn (Gesamtpunktzahl nur bei X01); lässt sich im Spiel umschalten.
   final InputMode inputMode;
 
   @override
@@ -26,48 +31,91 @@ class GameScreen extends StatefulWidget {
 }
 
 class _GameScreenState extends State<GameScreen> {
-  late X01Game _game = widget.createGame();
-  late InputMode _inputMode = widget.inputMode;
+  late Match _match = widget.match;
+  late Map<int, DartBot> _bots = _match.createBots();
+  late InputMode _inputMode = _match.settings.mode.supportsTotalInput ? widget.inputMode : InputMode.perDart;
   String? _message;
+  Timer? _botTimer;
 
   /// Läuft, solange die Kamera die Darts zählt.
   LiveDetection? _live;
 
+  DartGame get _game => _match.leg;
+  X01Game? get _x01 => _match.leg is X01Game ? _match.leg as X01Game : null;
+
+  /// Ob gerade ein Bot an der Reihe ist (dann sind die Eingaben gesperrt).
+  bool get _botTurn => !_game.isOver && _match.players[_game.currentPlayer].isBot;
+
+  String _name(int player) => _match.players[player].name;
+
+  @override
+  void initState() {
+    super.initState();
+    _scheduleBot();
+  }
+
   @override
   void dispose() {
+    _botTimer?.cancel();
     _live?.dispose();
     super.dispose();
   }
 
   // ---------------------------------------------------------------- Spielzüge
 
-  void _onHit(Hit hit) {
-    if (_game.isOver) return;
+  void _onHit(Hit hit, {bool fromBot = false}) {
+    if (_game.isOver || (_botTurn && !fromBot)) return;
     final player = _game.currentPlayer;
     final turn = _game.currentTurn;
-    final result = _game.throwDart(hit);
+    _handleResult(_game.throwDart(hit), player, turn);
+  }
+
+  /// Gemeinsame Auswertung nach jedem Wurf/jeder Eingabe: Meldung, Ansage, Leg-Ende, Bot.
+  void _handleResult(ThrowResult result, int player, Turn turn) {
+    final label = _game.turnLabel(turn);
     setState(() {
       _message = switch (result) {
         ThrowResult.bust => 'Bust!',
-        ThrowResult.win => null,
-        _ when turn.darts.length == dartsPerTurn && turn.thrown == 180 => 'Hundertachtzig!',
-        ThrowResult.turnOver => '${_game.players[player]}: ${turn.thrown}',
-        ThrowResult.ok => null,
+        ThrowResult.win || ThrowResult.ok => null,
+        ThrowResult.turnOver when _x01 != null && _x01!.turnPoints(turn) == 180 => 'Hundertachtzig!',
+        ThrowResult.turnOver => '${_name(player)}: $label',
       };
     });
-    if (result == ThrowResult.win) _showWinner(player);
+    if (result == ThrowResult.bust || result == ThrowResult.turnOver) _announceTurn(turn);
+    if (result == ThrowResult.win) {
+      _onLegWon(_game.winner!);
+    } else {
+      _scheduleBot();
+    }
   }
 
-  /// Eingabe der Gesamtpunktzahl. Liefert eine Fehlermeldung für das Zahlenfeld oder null.
+  void _announceTurn(Turn turn) {
+    final x01 = _x01;
+    if (x01 == null) {
+      Speech.say(_game.turnLabel(turn));
+      return;
+    }
+    final points = x01.turnPoints(turn);
+    var text = turn.bust ? 'Bust' : (points == 180 ? 'Hundertachtzig!' : '$points');
+    final next = x01.currentPlayer;
+    final rest = x01.remaining(next);
+    if (!x01.isOver && suggestCheckout(rest, doubleOut: x01.doubleOut) != null) {
+      text += '. ${_name(next)}, du brauchst $rest';
+    }
+    Speech.say(text);
+  }
+
+  /// Eingabe der Gesamtpunktzahl (X01). Liefert eine Fehlermeldung für das Zahlenfeld oder null.
   Future<String?> _onTotal(int score) async {
-    if (_game.isOver) return null;
-    final player = _game.currentPlayer;
+    final x01 = _x01;
+    if (x01 == null || x01.isOver || _botTurn) return null;
+    final player = x01.currentPlayer;
     var darts = dartsPerTurn;
-    if (score == _game.remaining(player) && score > 0) {
+    if (score == x01.remaining(player) && score > 0) {
       // Checkout: mit wie vielen Darts? (für den Average) – nur mögliche Anzahlen anbieten
       final options = [
         for (var n = 1; n <= dartsPerTurn; n++)
-          if (suggestCheckout(score, darts: n, doubleOut: _game.doubleOut) != null) n,
+          if (suggestCheckout(score, darts: n, doubleOut: x01.doubleOut) != null) n,
       ];
       if (options.isEmpty) return '$score lässt sich nicht auschecken';
       if (options.length == 1) {
@@ -79,21 +127,14 @@ class _GameScreenState extends State<GameScreen> {
       }
     }
 
+    final turn = x01.currentTurn;
     final ThrowResult result;
     try {
-      result = _game.enterTurnTotal(score, darts: darts);
+      result = x01.enterTurnTotal(score, darts: darts);
     } on ArgumentError catch (e) {
       return e.message as String;
     }
-    setState(() {
-      _message = switch (result) {
-        ThrowResult.bust => 'Bust!',
-        ThrowResult.win => null,
-        _ when score == 180 => 'Hundertachtzig!',
-        _ => '${_game.players[player]}: $score',
-      };
-    });
-    if (result == ThrowResult.win) _showWinner(player);
+    _handleResult(result, player, turn);
     return null;
   }
 
@@ -112,23 +153,39 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   void _toggleInputMode() => setState(() {
-    _inputMode = _inputMode == InputMode.perDart ? InputMode.turnTotal : InputMode.perDart;
-  });
+        _inputMode = _inputMode == InputMode.perDart ? InputMode.turnTotal : InputMode.perDart;
+      });
 
-  void _undo() => setState(() {
-    _game.undo();
-    _message = null;
-  });
+  /// Rückgängig – Bot-Würfe werden mit zurückgenommen, bis wieder ein Mensch dran ist.
+  void _undo() {
+    _botTimer?.cancel();
+    setState(() {
+      _match.undo();
+      while (_match.canUndo && _botTurn) {
+        _match.undo();
+      }
+      _message = null;
+    });
+    _scheduleBot();
+  }
 
-  void _nextPlayer() => setState(() {
+  void _nextPlayer() {
+    if (_game.isOver) return;
+    final player = _game.currentPlayer;
+    final turn = _game.currentTurn;
     _game.nextPlayer();
-    _message = null;
-  });
+    _handleResult(_game.isOver ? ThrowResult.win : ThrowResult.turnOver, player, turn);
+  }
 
-  void _restart() => setState(() {
-    _game = widget.createGame();
-    _message = null;
-  });
+  void _restart() {
+    _botTimer?.cancel();
+    setState(() {
+      _match = Match(settings: _match.settings, players: _match.players);
+      _bots = _match.createBots();
+      _message = null;
+    });
+    _scheduleBot();
+  }
 
   Future<void> _correct(int index) async {
     final turn = _game.correctableTurn;
@@ -138,14 +195,22 @@ class _GameScreenState extends State<GameScreen> {
           .showSnackBar(const SnackBar(content: Text('Eingegebene Summe ändern: Rückgängig und neu eingeben')));
       return;
     }
+    _botTimer?.cancel();
     final hit = await _pickHit('Dart ${index + 1} korrigieren (erkannt: ${turn.darts[index].label})');
-    if (hit == null || !mounted) return;
+    if (hit == null || !mounted) {
+      _scheduleBot();
+      return;
+    }
     final wasOver = _game.isOver;
     setState(() {
       _game.correctDart(index, hit);
       _message = 'Korrigiert: ${hit.label}';
     });
-    if (!wasOver && _game.isOver) _showWinner(_game.winner!);
+    if (!wasOver && _game.isOver) {
+      _onLegWon(_game.winner!);
+    } else {
+      _scheduleBot();
+    }
   }
 
   /// Tastenfeld als Bottom Sheet; liefert das gewählte Feld oder null.
@@ -176,14 +241,60 @@ class _GameScreenState extends State<GameScreen> {
     if (hit != null && mounted) _onHit(hit);
   }
 
-  Future<void> _showWinner(int player) async {
+  // ---------------------------------------------------------------- Bot
+
+  void _scheduleBot() {
+    _botTimer?.cancel();
+    if (!mounted || !_botTurn) return;
+    _botTimer = Timer(const Duration(milliseconds: 900), () {
+      if (!mounted || !_botTurn) return;
+      final bot = _bots[_game.currentPlayer]!;
+      _onHit(bot.throwAt(_game.botTarget()), fromBot: true);
+    });
+  }
+
+  // ---------------------------------------------------------------- Leg- und Match-Ende
+
+  Future<void> _onLegWon(int player) async {
+    _botTimer?.cancel();
+    if (_match.isOver) return _onMatchWon(player);
+    Speech.say('Game shot! Leg an ${_name(player)}');
+    final wins = _match.legWins;
+    final action = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        icon: const Icon(Icons.flag_outlined),
+        title: Text('Leg an ${_name(player)}'),
+        content: Text('Stand: ${wins.join(' : ')}\n${_legSummary(player)}'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, 'undo'), child: const Text('Rückgängig')),
+          FilledButton(onPressed: () => Navigator.pop(context, 'next'), child: const Text('Nächstes Leg')),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (action == 'undo') return _undo();
+    setState(() {
+      _match.startNextLeg();
+      _message = null;
+    });
+    _scheduleBot();
+  }
+
+  Future<void> _onMatchWon(int player) async {
+    final solo = _match.players.length == 1;
+    Speech.say(solo ? 'Geschafft!' : 'Game shot and the match! ${_name(player)}');
     final action = await showDialog<String>(
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
         icon: const Icon(Icons.emoji_events_outlined),
-        title: Text('${_game.players[player]} gewinnt'),
-        content: Text('Average: ${_game.average(player).toStringAsFixed(1)}'),
+        title: Text(solo ? 'Fertig!' : '${_name(player)} gewinnt'),
+        content: Text([
+          if (_match.settings.bestOf > 1) 'Legs: ${_match.legWins.join(' : ')}',
+          _legSummary(player),
+        ].join('\n')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, 'undo'), child: const Text('Rückgängig')),
           TextButton(onPressed: () => Navigator.pop(context, 'menu'), child: const Text('Menü')),
@@ -192,32 +303,41 @@ class _GameScreenState extends State<GameScreen> {
       ),
     );
     if (!mounted) return;
-    switch (action) {
-      case 'undo':
-        _undo();
-      case 'rematch':
-        _restart();
-      case 'menu':
-        Navigator.of(context).pop();
+    if (action == 'undo') return _undo();
+    // Erst beim Verlassen speichern – "Rückgängig" soll kein halbes Match in die Historie schreiben
+    await (await LocalStore.instance()).saveMatch(_match);
+    if (!mounted) return;
+    if (action == 'rematch') {
+      _restart();
+    } else {
+      Navigator.of(context).pop();
     }
   }
+
+  /// Kurze Statistik für die Dialoge.
+  String _legSummary(int player) {
+    final stats = _match.stats()[player];
+    final parts = [
+      for (final key in const ['average', 'mpr', 'score', 'checkouts', 'darts'])
+        if (stats[key] != null) '${Match.statLabels[key]}: ${_format(stats[key]!)}',
+    ];
+    return parts.take(2).join(' · ');
+  }
+
+  static String _format(num v) => v is int ? '$v' : v.toStringAsFixed(1);
 
   // ---------------------------------------------------------------- Kamera
 
   void _onDetected(Hit hit, Offset tip) {
-    if (!mounted || _game.isOver) return;
+    if (!mounted || _game.isOver || _botTurn) return;
     _onHit(hit);
   }
 
   /// Darts wurden gezogen. Stecken weniger als 3 in der Aufnahme, gingen die übrigen daneben.
   void _onCleared() {
-    if (!mounted || _game.isOver) return;
+    if (!mounted || _game.isOver || _botTurn) return;
     final turn = _game.currentTurn;
-    if (turn.darts.isNotEmpty && !turn.finished) {
-      final player = _game.players[_game.currentPlayer];
-      _nextPlayer();
-      setState(() => _message = '$player: ${turn.thrown}');
-    }
+    if (turn.darts.isNotEmpty && !turn.finished) _nextPlayer();
   }
 
   Future<void> _toggleCamera() async {
@@ -281,24 +401,42 @@ class _GameScreenState extends State<GameScreen> {
     if (mounted) setState(() {});
   }
 
+  Future<void> _toggleSpeech() async {
+    final store = await LocalStore.instance();
+    setState(() => Speech.enabled = !Speech.enabled);
+    await store.setSpeechEnabled(Speech.enabled);
+    if (Speech.enabled) {
+      Speech.unlock();
+      Speech.say('Sprachansage an');
+    }
+  }
+
   // ---------------------------------------------------------------- Oberfläche
 
   @override
   Widget build(BuildContext context) {
     final game = _game;
     final live = _live;
+    final x01 = _x01;
+    final totalInput = x01 != null && _inputMode == InputMode.turnTotal && live == null;
+    final inputEnabled = !game.isOver && !_botTurn;
+    final subtitle = [
+      ?game.subtitle,
+      if (_match.settings.bestOf > 1) 'Leg ${_match.legs.length} · Best of ${_match.settings.bestOf}',
+    ].join(' · ');
+
     return Scaffold(
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('${game.startScore}'),
-            if (game.doubleOut) Text('Double Out', style: Theme.of(context).textTheme.bodySmall),
+            Text(game.title),
+            if (subtitle.isNotEmpty) Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
           ],
         ),
         actions: [
-          if (live == null)
+          if (live == null && x01 != null)
             IconButton(
               tooltip: _inputMode == InputMode.perDart
                   ? 'Eingabe: einzelne Darts (umschalten auf Gesamtpunktzahl)'
@@ -313,8 +451,14 @@ class _GameScreenState extends State<GameScreen> {
             icon: const Icon(Icons.videocam_off_outlined),
             selectedIcon: const Icon(Icons.videocam),
           ),
-          IconButton(tooltip: 'Rückgängig', onPressed: game.canUndo ? _undo : null, icon: const Icon(Icons.undo)),
-          IconButton(tooltip: 'Neu starten', onPressed: _restart, icon: const Icon(Icons.refresh)),
+          IconButton(tooltip: 'Rückgängig', onPressed: _match.canUndo ? _undo : null, icon: const Icon(Icons.undo)),
+          PopupMenuButton<String>(
+            onSelected: (v) => v == 'speech' ? _toggleSpeech() : _restart(),
+            itemBuilder: (context) => [
+              CheckedPopupMenuItem(value: 'speech', checked: Speech.enabled, child: const Text('Sprachansage')),
+              const PopupMenuItem(value: 'restart', child: Text('Neu starten')),
+            ],
+          ),
         ],
       ),
       body: SafeArea(
@@ -329,9 +473,9 @@ class _GameScreenState extends State<GameScreen> {
                   mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Scoreboard(game: game),
+                    Scoreboard(match: _match),
                     // Bei der Gesamtpunktzahl gibt es keine einzelnen Darts; die letzte Aufnahme steht in der Punktetafel
-                    if (live != null || _inputMode == InputMode.perDart) ...[
+                    if (!totalInput) ...[
                       const SizedBox(height: 12),
                       _TurnRow(game: game, onTapDart: _correct),
                     ] else
@@ -339,31 +483,34 @@ class _GameScreenState extends State<GameScreen> {
                     const SizedBox(height: 6),
                     SizedBox(
                       height: 28,
-                      child: _InfoLine(game: game, message: _message),
+                      child: _InfoLine(
+                        text: _message ?? (_botTurn ? '${_name(game.currentPlayer)} wirft …' : game.hint),
+                        highlight: _message != null,
+                      ),
                     ),
                     if (live == null) ...[
                       compact ? const SizedBox(height: 8) : const Spacer(),
-                      if (_inputMode == InputMode.perDart)
-                        InputPad(onHit: _onHit, enabled: !game.isOver)
+                      if (!totalInput)
+                        InputPad(onHit: _onHit, enabled: inputEnabled)
                       else
                         ScorePad(
                           onSubmit: _onTotal,
-                          enabled: !game.isOver && game.currentTurn.darts.isEmpty,
-                          disabledHint: game.isOver ? null : 'Erst die angefangene Aufnahme beenden',
-                          remaining: game.isOver ? null : game.remaining(game.currentPlayer),
+                          enabled: inputEnabled && game.currentTurn.darts.isEmpty,
+                          disabledHint: !inputEnabled ? null : 'Erst die angefangene Aufnahme beenden',
+                          remaining: game.isOver ? null : x01.remaining(x01.currentPlayer),
                         ),
                     ] else ...[
                       const SizedBox(height: 8),
                       Expanded(child: _buildCamera(live)),
                     ],
-                    if (live != null || _inputMode == InputMode.perDart) ...[
+                    if (!totalInput) ...[
                       const SizedBox(height: 8),
                       Row(
                         children: [
                           if (live != null) ...[
                             Expanded(
                               child: OutlinedButton.icon(
-                                onPressed: game.isOver ? null : _manualDart,
+                                onPressed: inputEnabled ? _manualDart : null,
                                 icon: const Icon(Icons.dialpad),
                                 label: const Text('Eintragen'),
                               ),
@@ -372,7 +519,7 @@ class _GameScreenState extends State<GameScreen> {
                           ],
                           Expanded(
                             child: OutlinedButton.icon(
-                              onPressed: game.isOver || game.currentTurn.darts.isEmpty ? null : _nextPlayer,
+                              onPressed: !inputEnabled || game.currentTurn.darts.isEmpty ? null : _nextPlayer,
                               icon: const Icon(Icons.skip_next),
                               label: const Text('Aufnahme beenden'),
                             ),
@@ -449,7 +596,7 @@ class _GameScreenState extends State<GameScreen> {
 class _TurnRow extends StatelessWidget {
   const _TurnRow({required this.game, required this.onTapDart});
 
-  final X01Game game;
+  final DartGame game;
   final ValueChanged<int> onTapDart;
 
   @override
@@ -516,8 +663,8 @@ class _TurnRow extends StatelessWidget {
                               color: i >= darts.length
                                   ? scheme.outline
                                   : previous
-                                  ? scheme.onSurfaceVariant
-                                  : scheme.onSurface,
+                                      ? scheme.onSurfaceVariant
+                                      : scheme.onSurface,
                             ),
                           ),
                         ),
@@ -528,12 +675,17 @@ class _TurnRow extends StatelessWidget {
               ],
             const SizedBox(width: 10),
             SizedBox(
-              width: 52,
-              child: Text(
-                '${previous ? turn.scored : turn.thrown}',
-                textAlign: TextAlign.end,
-                style: Theme.of(context).textTheme.headlineSmall
-                    ?.copyWith(color: previous ? scheme.onSurfaceVariant : null),
+              width: 72,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Text(
+                  game.turnLabel(turn),
+                  style: Theme.of(context)
+                      .textTheme
+                      .headlineSmall
+                      ?.copyWith(color: previous ? scheme.onSurfaceVariant : null),
+                ),
               ),
             ),
           ],
@@ -543,31 +695,24 @@ class _TurnRow extends StatelessWidget {
   }
 }
 
-/// Meldung (Bust, 180, ...) oder Checkout-Vorschlag.
+/// Meldung (Bust, 180, …) oder Hinweis des Modus (Checkout-Weg, Ziel, …).
 class _InfoLine extends StatelessWidget {
-  const _InfoLine({required this.game, required this.message});
+  const _InfoLine({required this.text, required this.highlight});
 
-  final X01Game game;
-  final String? message;
+  final String? text;
+  final bool highlight;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    if (message != null) {
-      return Text(
-        message!,
-        textAlign: TextAlign.center,
-        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500, color: scheme.primary),
-      );
-    }
-    if (game.isOver) return const SizedBox();
-
-    final rest = game.displayRemaining(game.currentPlayer);
-    final way = suggestCheckout(rest, darts: game.dartsLeftInTurn, doubleOut: game.doubleOut);
     return Text(
-      way == null ? ' ' : 'Checkout: ${way.join(' · ')}',
+      text ?? ' ',
       textAlign: TextAlign.center,
-      style: TextStyle(fontSize: 16, color: scheme.onSurfaceVariant),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: highlight
+          ? TextStyle(fontSize: 18, fontWeight: FontWeight.w500, color: scheme.primary)
+          : TextStyle(fontSize: 16, color: scheme.onSurfaceVariant),
     );
   }
 }
