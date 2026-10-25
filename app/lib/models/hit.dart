@@ -19,6 +19,18 @@ class Hit {
   const Hit.double(int segment) : this(segment, 2);
   const Hit.triple(int segment) : this(segment, 3);
 
+  /// Liest ein Label wie "T20", "D16", "5", "25", "Bull" oder "Miss" (Umkehrung von [label]).
+  factory Hit.parse(String label) {
+    final s = label.trim().toUpperCase();
+    if (s == 'MISS' || s == '0') return miss;
+    if (s == 'BULL' || s == 'D25' || s == '50') return bull;
+    if (s == '25' || s == 'S25') return outerBull;
+    final multiplier = switch (s[0]) { 'T' => 3, 'D' => 2, 'S' => 1, _ => 0 };
+    final number = int.tryParse(multiplier == 0 ? s : s.substring(1));
+    if (number == null || number < 1 || number > 20) throw FormatException('Unbekanntes Feld: $label');
+    return Hit(number, multiplier == 0 ? 1 : multiplier);
+  }
+
   int get value => segment * multiplier;
   bool get isDouble => multiplier == 2;
 

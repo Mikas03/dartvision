@@ -1,117 +1,130 @@
 import 'checkout.dart';
+import 'dart_game.dart';
 import 'hit.dart';
 
-const dartsPerTurn = 3;
+export 'dart_game.dart';
 
-/// Wie Würfe eingegeben werden.
-enum InputMode {
-  /// Jeder Dart einzeln (Feld und Multiplikator) – auch so arbeitet die Kamera.
-  perDart,
+/// Wie ein X01-Leg beendet werden muss.
+enum OutRule {
+  /// Mit jedem Feld.
+  straight,
 
-  /// Nur die Summe der Aufnahme, z. B. 100.
-  turnTotal,
+  /// Mit einem Doppel (Standard).
+  double,
+
+  /// Mit einem Doppel oder Triple.
+  master,
 }
 
-/// Eine Aufnahme (bis zu 3 Darts) eines Spielers.
-class Turn {
-  Turn(this.player);
+/// X01 (301, 501, 701 …): Punkte von der Startzahl abziehen, genau auf 0 enden.
+class X01Game extends DartGame {
+  X01Game({
+    required super.players,
+    super.startingPlayer,
+    this.startScore = 501,
+    bool doubleOut = true,
+    bool masterOut = false,
+    this.doubleIn = false,
+  }) : outRule = !doubleOut
+            ? OutRule.straight
+            : masterOut
+                ? OutRule.master
+                : OutRule.double;
 
-  final int player;
-  final List<Hit> darts = [];
-  bool bust = false;
-  bool finished = false;
+  final int startScore;
+  final OutRule outRule;
 
-  /// Bei Eingabe der Gesamtpunktzahl: die Summe (die einzelnen Darts sind dann unbekannt).
-  int? total;
+  /// Punkte zählen erst ab dem ersten Doppel.
+  final bool doubleIn;
 
-  /// Bei Eingabe der Gesamtpunktzahl: wie viele Darts geworfen wurden (3, außer beim Checkout).
-  int totalDarts = dartsPerTurn;
+  bool get doubleOut => outRule != OutRule.straight;
 
-  bool get isTotal => total != null;
+  @override
+  String get title => '$startScore';
 
-  int get thrown => total ?? darts.fold(0, (sum, h) => sum + h.value);
-
-  /// Anzahl geworfener Darts (für den Average).
-  int get dartCount => isTotal ? totalDarts : darts.length;
-
-  /// Punkte, die tatsächlich abgezogen werden (bei Bust 0).
-  int get scored => bust ? 0 : thrown;
-}
-
-enum ThrowResult { ok, bust, turnOver, win }
-
-/// X01-Spiel (301, 501, ...). Der Spielstand wird komplett aus der Liste der Aufnahmen
-/// berechnet, dadurch funktioniert Rückgängig auch über Aufnahmen hinweg.
-class X01Game {
-  X01Game({required List<String> players, this.startScore = 501, this.doubleOut = true})
-      : players = List.unmodifiable(players) {
-    if (players.isEmpty) throw ArgumentError('Mindestens ein Spieler nötig');
-    _turns.add(Turn(0));
+  @override
+  String? get subtitle {
+    final parts = [
+      if (doubleIn) 'Double In',
+      switch (outRule) { OutRule.straight => 'Single Out', OutRule.double => 'Double Out', OutRule.master => 'Master Out' },
+    ];
+    return parts.join(' · ');
   }
 
-  final List<String> players;
-  final int startScore;
-  final bool doubleOut;
+  /// Punkte, die eine Aufnahme zählt (bei Double In erst ab dem ersten Doppel).
+  int turnPoints(Turn turn) {
+    if (turn.bust) return 0;
+    if (!doubleIn || turn.isTotal || _isInBefore(turn)) return turn.thrown;
+    final first = turn.darts.indexWhere((d) => d.isDouble);
+    if (first < 0) return 0;
+    return turn.darts.skip(first).fold(0, (sum, d) => sum + d.value);
+  }
 
-  final List<Turn> _turns = [];
-  int? _winner;
+  /// Ob der Spieler vor [turn] schon "drin" ist (Double In).
+  bool _isInBefore(Turn turn) {
+    for (final t in turns) {
+      if (identical(t, turn)) return false;
+      if (t.player == turn.player && t.finished && !t.bust && (t.isTotal ? t.thrown > 0 : t.darts.any((d) => d.isDouble))) {
+        return true;
+      }
+    }
+    return false;
+  }
 
-  List<Turn> get turns => List.unmodifiable(_turns);
-  Turn get currentTurn => _turns.last;
-  int get currentPlayer => currentTurn.player;
-  int? get winner => _winner;
-  bool get isOver => _winner != null;
-  int get dartsLeftInTurn => dartsPerTurn - currentTurn.darts.length;
+  /// Ob der aktuelle Spieler noch ein Doppel zum Reinkommen braucht.
+  bool get needsDoubleIn => doubleIn && turnPoints(currentTurn) == 0 && !_isInBefore(currentTurn);
 
   /// Restpunkte vor der laufenden Aufnahme.
-  int remaining(int player) =>
-      startScore -
-      _turns.where((t) => t.player == player && t.finished).fold(0, (sum, t) => sum + t.scored);
+  int remaining(int player) => startScore - finishedTurnsOf(player).fold(0, (sum, t) => sum + turnPoints(t));
 
   /// Restpunkte inklusive der Darts der laufenden Aufnahme (für die Anzeige).
   int displayRemaining(int player) {
     if (player != currentPlayer || currentTurn.finished) return remaining(player);
-    return remaining(player) - currentTurn.thrown;
+    return remaining(player) - turnPoints(currentTurn);
   }
 
-  /// 3-Dart-Average.
-  double average(int player) {
-    final own = _turns.where((t) => t.player == player);
-    final darts = own.fold(0, (sum, t) => sum + t.dartCount);
-    if (darts == 0) return 0;
-    final points = own.fold(0, (sum, t) => sum + (t.finished ? t.scored : t.thrown));
-    return points / darts * dartsPerTurn;
+  bool _validFinish(Hit hit) => switch (outRule) {
+        OutRule.straight => true,
+        OutRule.double => hit.isDouble,
+        OutRule.master => hit.isDouble || hit.multiplier == 3,
+      };
+
+  @override
+  DartOutcome evaluateDart(Turn turn, Hit hit) {
+    final rest = remaining(turn.player) - turnPoints(turn);
+    if (rest < 0 || (doubleOut && rest == 1) || (rest == 0 && !_validFinish(hit))) return DartOutcome.bust;
+    if (rest == 0) return DartOutcome.win;
+    return DartOutcome.ok;
   }
 
-  /// Letzte abgeschlossene Aufnahme eines Spielers.
-  Turn? lastTurn(int player) {
-    for (final t in _turns.reversed) {
-      if (t.player == player && t.finished) return t;
-    }
-    return null;
+  @override
+  String turnLabel(Turn turn) => turn.bust ? 'Bust' : '${turnPoints(turn)}';
+
+  /// Checkout-Weg für den aktuellen Spieler mit den verbleibenden Darts, oder null.
+  List<Hit>? get checkoutWay {
+    if (isOver || needsDoubleIn) return null;
+    return suggestCheckout(displayRemaining(currentPlayer), darts: dartsLeftInTurn, doubleOut: doubleOut);
   }
 
-  ThrowResult throwDart(Hit hit) {
-    if (isOver) throw StateError('Spiel ist bereits beendet');
-
-    currentTurn.darts.add(hit);
-    final rest = remaining(currentPlayer) - currentTurn.thrown;
-
-    if (rest < 0 || (doubleOut && rest == 1) || (rest == 0 && doubleOut && !hit.isDouble)) {
-      _finishTurn(bust: true);
-      return ThrowResult.bust;
-    }
-    if (rest == 0) {
-      currentTurn.finished = true;
-      _winner = currentPlayer;
-      return ThrowResult.win;
-    }
-    if (currentTurn.darts.length == dartsPerTurn) {
-      _finishTurn();
-      return ThrowResult.turnOver;
-    }
-    return ThrowResult.ok;
+  @override
+  String? get hint {
+    if (isOver) return null;
+    if (needsDoubleIn) return 'Erst ein Doppel treffen (Double In)';
+    final way = checkoutWay;
+    return way == null ? null : 'Checkout: ${way.join(' · ')}';
   }
+
+  @override
+  Hit botTarget() {
+    if (needsDoubleIn) return const Hit.double(20);
+    final rest = displayRemaining(currentPlayer);
+    final way = suggestCheckout(rest, darts: dartsLeftInTurn, doubleOut: doubleOut) ??
+        suggestCheckout(rest, darts: 2, doubleOut: doubleOut) ??
+        suggestCheckout(rest, darts: 3, doubleOut: doubleOut);
+    return way?.first ?? const Hit.triple(20);
+  }
+
+  // ---------------------------------------------------------------- Summeneingabe
 
   /// Trägt die Summe einer ganzen Aufnahme ein (Eingabeart [InputMode.turnTotal]).
   ///
@@ -124,93 +137,53 @@ class X01Game {
     if (!isPossibleScore(score)) throw ArgumentError('$score kann man mit drei Darts nicht werfen');
 
     final rest = remaining(currentPlayer) - score;
-    final turn = currentTurn
-      ..total = score
-      ..totalDarts = dartsPerTurn;
+    if (rest == 0 && suggestCheckout(score, darts: darts, doubleOut: doubleOut) == null) {
+      throw ArgumentError(darts == dartsPerTurn
+          ? '$score lässt sich nicht auschecken'
+          : '$score lässt sich nicht mit $darts ${darts == 1 ? 'Dart' : 'Darts'} auschecken');
+    }
+    setTotal(score, dartsPerTurn);
     if (rest < 0 || (doubleOut && rest == 1)) {
-      _finishTurn(bust: true);
+      finishTurn(bust: true);
       return ThrowResult.bust;
     }
     if (rest == 0) {
-      if (suggestCheckout(score, darts: darts, doubleOut: doubleOut) == null) {
-        turn.total = null;
-        throw ArgumentError(darts == dartsPerTurn
-            ? '$score lässt sich nicht auschecken'
-            : '$score lässt sich nicht mit $darts ${darts == 1 ? 'Dart' : 'Darts'} auschecken');
-      }
-      turn
-        ..totalDarts = darts
-        ..finished = true;
-      _winner = currentPlayer;
+      setTotal(score, darts);
+      declareWinner();
       return ThrowResult.win;
     }
-    _finishTurn();
+    finishTurn();
     return ThrowResult.turnOver;
   }
 
-  /// Aufnahme vorzeitig beenden, z. B. wenn Darts nicht gezählt werden sollen.
-  void nextPlayer() {
-    if (!isOver) _finishTurn();
+  @override
+  void replayTotal(int total, int darts) => enterTurnTotal(total, darts: darts);
+
+  // ---------------------------------------------------------------- Statistik
+
+  /// 3-Dart-Average.
+  double average(int player) {
+    final own = turnsOf(player);
+    final darts = own.fold(0, (sum, t) => sum + t.dartCount);
+    if (darts == 0) return 0;
+    final points = own.fold(0, (sum, t) => sum + turnPoints(t));
+    return points / darts * dartsPerTurn;
   }
 
-  bool get canUndo => _turns.length > 1 || currentTurn.darts.isNotEmpty;
-
-  /// Nimmt den letzten Dart zurück (bzw. die zuletzt eingegebene Gesamtpunktzahl),
-  /// auch aus einer bereits beendeten Aufnahme.
-  void undo() {
-    if (!canUndo) return;
-    if (currentTurn.darts.isEmpty && !currentTurn.isTotal && !currentTurn.finished) {
-      _turns.removeLast();
-    }
-    _winner = null;
-    final turn = currentTurn
-      ..finished = false
-      ..bust = false;
-    if (turn.isTotal) {
-      turn.total = null;
-    } else if (turn.darts.isNotEmpty) {
-      turn.darts.removeLast();
-    }
+  /// Average der ersten 9 Darts (erste drei Aufnahmen).
+  double first9Average(int player) {
+    final own = turnsOf(player).where((t) => t.finished).take(3).toList();
+    final darts = own.fold(0, (sum, t) => sum + t.dartCount);
+    if (darts == 0) return 0;
+    return own.fold(0, (sum, t) => sum + turnPoints(t)) / darts * dartsPerTurn;
   }
 
-  /// Aufnahme, deren Darts angezeigt und korrigiert werden können: die laufende,
-  /// oder – solange darin noch kein Dart ist – die vorige.
-  Turn? get correctableTurn {
-    if (currentTurn.darts.isNotEmpty || currentTurn.isTotal) return currentTurn;
-    if (_turns.length > 1) return _turns[_turns.length - 2];
-    return null;
-  }
+  /// Anzahl Aufnahmen mit mindestens [points] Punkten.
+  int countAtLeast(int player, int points) => finishedTurnsOf(player).where((t) => turnPoints(t) >= points).length;
 
-  /// Ersetzt Dart Nr. [index] der [correctableTurn] durch [hit] und rechnet alles danach neu
-  /// (z. B. wenn die Kamera ein Feld falsch erkannt hat).
-  void correctDart(int index, Hit hit) {
-    final turn = correctableTurn;
-    if (turn != null && turn.isTotal) {
-      throw StateError('Bei eingegebener Gesamtpunktzahl gibt es keine einzelnen Darts');
-    }
-    if (turn == null || index < 0 || index >= turn.darts.length) {
-      throw RangeError('Kein Dart $index zum Korrigieren');
-    }
-    final later = turn.darts.sublist(index + 1);
-    // Wurde die Aufnahme vorzeitig beendet (Darts gezogen), soll sie das danach wieder sein
-    final endedEarly = turn.finished && !turn.bust && !isOver && turn.darts.length < dartsPerTurn;
+  /// Wert des Checkouts, falls [player] das Leg gewonnen hat.
+  int? checkout(int player) => winner == player ? turnPoints(currentTurn) : null;
 
-    // Darts ab [index] zurücknehmen; das öffnet die Aufnahme bei Bedarf wieder
-    while (turn.darts.length > index) {
-      undo();
-    }
-    throwDart(hit);
-    for (final h in later) {
-      if (isOver || turn.finished || !identical(currentTurn, turn)) break;
-      throwDart(h);
-    }
-    if (endedEarly && identical(currentTurn, turn) && !turn.finished) nextPlayer();
-  }
-
-  void _finishTurn({bool bust = false}) {
-    currentTurn
-      ..bust = bust
-      ..finished = true;
-    _turns.add(Turn((currentPlayer + 1) % players.length));
-  }
+  /// Geworfene Darts eines Spielers.
+  int dartsThrown(int player) => turnsOf(player).fold(0, (sum, t) => sum + t.dartCount);
 }
