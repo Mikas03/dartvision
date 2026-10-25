@@ -116,7 +116,12 @@ GitHub-Pages-Adresse (nicht über den lokalen Server im WLAN).
 4. **Aufnehmen** speichert ein Video, **Kalibrierung** die passende JSON-Datei
    (auf dem iPhone landen beide in der Dateien-App unter „Downloads“).
 
-Ohne Kamera (z. B. am PC) gibt es den Knopf „Mit Testbild ausprobieren“.
+**Erkennung an** startet die Live-Erkennung (ca. 10 Bilder/s): erkannte Darts erscheinen mit
+Feld im Bild, nach dem Ziehen der Darts wird die Liste geleert. **Scheibe ist leer** setzt das
+Referenzbild neu (z. B. nach Lichtänderung).
+
+Ohne Kamera und Board: Film-Symbol oben rechts → **Demo-Szene**. Sie spielt eine synthetische
+Szene aus dem Python-Generator ab (`app/assets/demo_scene`) und lässt die Erkennung darauf laufen.
 
 Auswerten mit dem Python-Prototyp:
 
@@ -150,4 +155,7 @@ Die Kalibrierung wird auch im Browser gespeichert und ist beim nächsten Öffnen
 - [ ] App aufs Handy bringen (Android Studio / SDK installieren)
 - [x] Kamera in der App: Vorschau, Kalibrierung, Testvideos aufnehmen
 - [ ] Echte Testvideos aufnehmen (ausgedrucktes Board + Zahnstocher reicht) und auswerten
-- [ ] Erkennung in der App (Differenzbild-Ansatz aus `detection.py` übertragen)
+- [x] Erkennung in der App (`app/lib/vision/detector.dart`, gleiche Logik wie `detection.py`;
+      `app/test/detector_test.dart` und `tests/test_fixture.py` prüfen auf derselben Szene,
+      dass beide Versionen dasselbe Ergebnis liefern)
+- [ ] Erkennung im Spiel: erkannte Darts direkt in den Zähler übernehmen

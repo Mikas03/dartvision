@@ -29,6 +29,8 @@ class DetectorConfig:
     stable_frames: int = 8  # so viele ruhige Bilder hintereinander, bevor ausgewertet wird
     min_dart_area: int = 300  # kleinere Änderungen ignorieren (Rauschen)
     max_dart_area: int = 30_000  # größere Änderungen = Hand / Person / Darts ziehen
+    # Die Flächenwerte gelten für diese Bildgröße und werden für andere Auflösungen skaliert
+    reference_pixels: int = 1280 * 720
     end_fraction: float = 0.15  # Anteil der Dartlänge, der zur Breitenmessung genutzt wird
     remove_shadows: bool = True
     shadow_min_ratio: float = 0.45  # Schatten machen höchstens so viel dunkler ...
@@ -57,10 +59,12 @@ class DartDetector:
         self.previous: np.ndarray | None = None
         self.stable_count = 0
         self.darts_on_board = 0
+        self.area_scale = 1.0
 
     def reset(self, frame: np.ndarray, empty: bool = False) -> None:
         """Setzt das aktuelle Bild als Referenz; mit empty=True auch als leere Scheibe."""
         img = self._prepare(frame)
+        self.area_scale = img.shape[0] * img.shape[1] / self.config.reference_pixels
         self.reference = img
         self.previous = img
         self.stable_count = 0
@@ -74,7 +78,8 @@ class DartDetector:
             self.reset(frame, empty=True)
             return Detection(Event.NONE)
 
-        moving = np.count_nonzero(self._diff(img, self.previous)) > self.config.motion_pixels
+        cfg, scale = self.config, self.area_scale
+        moving = np.count_nonzero(self._diff(img, self.previous)) > cfg.motion_pixels * scale
         self.previous = img
         self.stable_count = 0 if moving else self.stable_count + 1
         if self.stable_count != self.config.stable_frames:
@@ -82,16 +87,16 @@ class DartDetector:
 
         # Bild ist gerade ruhig geworden. Sieht es wieder wie die leere Scheibe aus,
         # wurden die Darts gezogen.
-        if self.darts_on_board and np.count_nonzero(self._dart_mask(img, self.empty)) < self.config.min_dart_area:
+        if self.darts_on_board and np.count_nonzero(self._dart_mask(img, self.empty)) < cfg.min_dart_area * scale:
             self.reference = img
             self.darts_on_board = 0
             return Detection(Event.BOARD_CLEARED)
 
         mask = self._dart_mask(img, self.reference)
         changed = np.count_nonzero(mask)
-        if changed < self.config.min_dart_area:
+        if changed < cfg.min_dart_area * scale:
             return Detection(Event.NONE)
-        if changed > self.config.max_dart_area:
+        if changed > cfg.max_dart_area * scale:
             # Person/Hand steht im Bild -> ignorieren, Referenz bleibt
             return Detection(Event.NONE, mask=mask)
 

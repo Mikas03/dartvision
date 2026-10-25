@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../models/board.dart';
+import '../models/hit.dart';
 import '../vision/calibration.dart';
 
 /// Zeichnet Kalibrierpunkte, das projizierte Scheibenraster und einen Testpunkt
@@ -14,6 +15,7 @@ class BoardOverlayPainter extends CustomPainter {
     required this.activeHandle,
     this.testPoint,
     this.testLabel,
+    this.detected = const [],
     required this.color,
   });
 
@@ -22,6 +24,9 @@ class BoardOverlayPainter extends CustomPainter {
   final int? activeHandle;
   final Offset? testPoint;
   final String? testLabel;
+
+  /// Erkannte Darts: Spitze (normiert) und Feld.
+  final List<(Offset, Hit)> detected;
   final Color color;
 
   @override
@@ -67,6 +72,20 @@ class BoardOverlayPainter extends CustomPainter {
       _label(canvas, '${calibrationOrder[i]}', p + const Offset(14, -26));
     }
 
+    for (final (tip, hit) in detected) {
+      final p = px(tip);
+      canvas.drawCircle(p, 6, Paint()..color = Colors.cyanAccent);
+      canvas.drawCircle(
+        p,
+        6,
+        Paint()
+          ..color = Colors.black
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5,
+      );
+      _label(canvas, hit.label, p + const Offset(8, 4), background: Colors.cyan.shade800);
+    }
+
     final test = testPoint;
     if (test != null) {
       final p = px(test);
@@ -102,5 +121,6 @@ class BoardOverlayPainter extends CustomPainter {
       old.activeHandle != activeHandle ||
       old.testPoint != testPoint ||
       old.testLabel != testLabel ||
+      old.detected != detected ||
       old.color != color;
 }

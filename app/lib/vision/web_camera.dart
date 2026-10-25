@@ -1,10 +1,13 @@
 import 'dart:async';
 import 'dart:js_interop';
+import 'dart:math' as math;
 import 'dart:ui' show Size;
 import 'dart:ui_web' as ui_web;
 
 import 'package:flutter/foundation.dart';
 import 'package:web/web.dart' as web;
+
+import 'detector.dart';
 
 /// Kamera im Browser über getUserMedia. Das Video wird mit object-fit: contain angezeigt,
 /// d. h. ohne Beschnitt. Dadurch entsprechen normierte Koordinaten auf der Vorschau exakt
@@ -22,6 +25,8 @@ class WebCamera {
   web.MediaRecorder? _recorder;
   final List<web.Blob> _chunks = [];
   String _mimeType = 'video/mp4';
+  web.HTMLCanvasElement? _canvas;
+  web.CanvasRenderingContext2D? _context;
 
   bool get isRecording => _recorder != null;
 
@@ -82,6 +87,27 @@ class WebCamera {
     updateSize();
     await ready.future.timeout(const Duration(seconds: 10),
         onTimeout: () => throw const CameraException('Kamera liefert kein Bild.'));
+  }
+
+  /// Aktuelles Kamerabild, verkleinert auf höchstens [maxWidth] Pixel Breite (für die Erkennung).
+  Frame? grabFrame({int maxWidth = 960}) {
+    final video = _video;
+    if (video == null || video.videoWidth == 0 || video.videoHeight == 0) return null;
+    final scale = math.min(1.0, maxWidth / video.videoWidth);
+    final w = (video.videoWidth * scale).round(), h = (video.videoHeight * scale).round();
+
+    var canvas = _canvas;
+    if (canvas == null || canvas.width != w || canvas.height != h) {
+      canvas = web.HTMLCanvasElement()
+        ..width = w
+        ..height = h;
+      _canvas = canvas;
+      _context = canvas.getContext('2d', {'willReadFrequently': true}.jsify()) as web.CanvasRenderingContext2D;
+    }
+    final context = _context!;
+    context.drawImage(video, 0, 0, w, h);
+    final pixels = context.getImageData(0, 0, w, h).data.toDart;
+    return Frame(w, h, Uint8List.view(pixels.buffer, pixels.offsetInBytes, pixels.length));
   }
 
   void startRecording() {

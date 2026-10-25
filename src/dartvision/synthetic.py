@@ -18,7 +18,7 @@ import cv2
 import numpy as np
 
 from . import board
-from .board import SEGMENTS, score
+from .board import CALIBRATION_POINTS_MM, SEGMENTS, score
 from .calibration import Calibration
 
 R_SURROUND = 225.0  # schwarzer Rand mit Zahlenring
@@ -201,26 +201,32 @@ class Scenario:
     shadows: bool = True
     noise: float = 2.0  # Bildrauschen (Standardabweichung in Grauwerten)
     hold_frames: int = 25  # so lange steckt ein Dart, bevor der nächste kommt
+    flight_heights: tuple[float, ...] = (900, 550, 280, 90)  # Bilder vom Dart im Anflug (mm vor der Scheibe)
+    pull_steps: int = 10  # Bilder, in denen die Hand ins Bild kommt bzw. wieder geht
     truth: list[TruthDart] = field(init=False, default_factory=list)
 
     def __post_init__(self) -> None:
         self.cam = Camera(self.camera)
         self.renderer = SceneRenderer(self.cam, shadows=self.shadows)
         self.calibration = Calibration(np.linalg.inv(self.cam.board_to_image()))
-        self.rng = np.random.default_rng(self.seed)
+        self.rng = np.random.default_rng(self.seed)  # für die Würfe
+        self._noise_rng = np.random.default_rng(self.seed + 1_000_003)  # fürs Rauschen
         # Vorberechnetes Rauschen, zufällig gewählt pro Bild (deutlich schneller als jedes Mal neu)
         shape = (self.camera.height, self.camera.width, 3)
-        self._noise_bank = [self.rng.normal(0, self.noise, shape).astype(np.int16) for _ in range(8)]
+        self._noise_bank = [self._noise_rng.normal(0, self.noise, shape).astype(np.int16) for _ in range(8)]
 
-    def frames(self) -> Iterator[np.ndarray]:
+    def states(self) -> Iterator[tuple[np.ndarray, int]]:
+        """Die Szene als Folge (Bild ohne Rauschen, Anzahl Wiederholungen).
+
+        Füllt nebenbei self.truth mit den echten Einstichstellen.
+        """
         self.truth = []
         frame_no = 0
 
-        def emit(img: np.ndarray, count: int = 1) -> Iterator[np.ndarray]:
+        def emit(img: np.ndarray, count: int = 1) -> Iterator[tuple[np.ndarray, int]]:
             nonlocal frame_no
-            for _ in range(count):
-                yield self._add_noise(img)
-                frame_no += 1
+            yield img, count
+            frame_no += count
 
         yield from emit(self.renderer.render([]), 30)
         for turn in range(self.turns):
@@ -228,7 +234,7 @@ class Scenario:
             darts: list[Dart] = []
             for index in range(3):
                 dart = self._random_dart(color)
-                for height in (900, 550, 280, 90):  # Dart im Anflug
+                for height in self.flight_heights:  # Dart im Anflug
                     flying = Dart(dart.tip_mm, dart.direction, dart.color, height)
                     yield from emit(self.renderer.render(darts + [flying]))
                 darts.append(dart)
@@ -240,12 +246,17 @@ class Scenario:
             yield from self._pull_darts(darts, emit)
             yield from emit(self.renderer.render([]), 30)
 
-    def _pull_darts(self, darts: list[Dart], emit) -> Iterator[np.ndarray]:
+    def frames(self) -> Iterator[np.ndarray]:
+        for img, count in self.states():
+            for _ in range(count):
+                yield self._add_noise(img)
+
+    def _pull_darts(self, darts: list[Dart], emit) -> Iterator[tuple[np.ndarray, int]]:
         """Eine 'Hand' kommt ins Bild, die Darts verschwinden, die Hand geht wieder."""
         target = np.mean([self.calibration.to_image(*d.tip_mm) for d in darts], axis=0)
         start = np.array([self.camera.width + 200, target[1] + 150])
         axes = (170, 120)
-        steps = 10
+        steps = self.pull_steps
         for i in range(steps):
             pos = start + (target - start) * (i + 1) / steps
             yield from emit(self.renderer.render(darts, (tuple(map(int, pos)), axes)))
@@ -274,7 +285,7 @@ class Scenario:
     def _add_noise(self, img: np.ndarray) -> np.ndarray:
         if self.noise <= 0:
             return img
-        noise = self._noise_bank[self.rng.integers(len(self._noise_bank))]
+        noise = self._noise_bank[self._noise_rng.integers(len(self._noise_bank))]
         return np.clip(img.astype(np.int16) + noise, 0, 255).astype(np.uint8)
 
     def save(self, video_path: str | Path, fps: int = 30) -> tuple[Path, Path]:
@@ -295,3 +306,37 @@ class Scenario:
         }, indent=2))
         self.calibration.save(video_path.with_suffix(".calibration.json"))
         return video_path, truth_path
+
+    def export_fixture(self, out_dir: str | Path, width: int = 960, quality: int = 85) -> Path:
+        """Exportiert die Szene kompakt als Einzelbilder + Wiederholungen (Testdaten für die App).
+
+        Rauschen wird nicht mitgespeichert; die JPEG-Kompression sorgt ohnehin für leichte Störungen.
+        """
+        out = Path(out_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        scale = width / self.camera.width
+        height = round(self.camera.height * scale)
+        states = []
+        for i, (img, count) in enumerate(self.states()):
+            name = f"s{i:03d}.jpg"
+            small = cv2.resize(img, (width, height), interpolation=cv2.INTER_AREA)
+            cv2.imwrite(str(out / name), small, [cv2.IMWRITE_JPEG_QUALITY, quality])
+            states.append({"image": name, "count": count})
+
+        size = (self.camera.width, self.camera.height)
+        points = [
+            [c / d for c, d in zip(self.calibration.to_image(*mm), size)]
+            for mm in CALIBRATION_POINTS_MM.values()
+        ]
+        (out / "scenario.json").write_text(json.dumps({
+            "width": width,
+            "height": height,
+            "states": states,
+            "calibration": {"order": list(CALIBRATION_POINTS_MM), "points_normalized": points},
+            "darts": [
+                {"frame": d.frame, "label": d.label,
+                 "tip_normalized": [d.tip_px[0] / size[0], d.tip_px[1] / size[1]]}
+                for d in self.truth
+            ],
+        }, indent=1))
+        return out

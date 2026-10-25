@@ -1,0 +1,246 @@
+{
+ "width": 960,
+ "height": 540,
+ "states": [
+  {
+   "image": "s000.jpg",
+   "count": 30
+  },
+  {
+   "image": "s001.jpg",
+   "count": 1
+  },
+  {
+   "image": "s002.jpg",
+   "count": 1
+  },
+  {
+   "image": "s003.jpg",
+   "count": 25
+  },
+  {
+   "image": "s004.jpg",
+   "count": 1
+  },
+  {
+   "image": "s005.jpg",
+   "count": 1
+  },
+  {
+   "image": "s006.jpg",
+   "count": 25
+  },
+  {
+   "image": "s007.jpg",
+   "count": 1
+  },
+  {
+   "image": "s008.jpg",
+   "count": 1
+  },
+  {
+   "image": "s009.jpg",
+   "count": 25
+  },
+  {
+   "image": "s010.jpg",
+   "count": 15
+  },
+  {
+   "image": "s011.jpg",
+   "count": 1
+  },
+  {
+   "image": "s012.jpg",
+   "count": 1
+  },
+  {
+   "image": "s013.jpg",
+   "count": 1
+  },
+  {
+   "image": "s014.jpg",
+   "count": 1
+  },
+  {
+   "image": "s015.jpg",
+   "count": 8
+  },
+  {
+   "image": "s016.jpg",
+   "count": 1
+  },
+  {
+   "image": "s017.jpg",
+   "count": 1
+  },
+  {
+   "image": "s018.jpg",
+   "count": 1
+  },
+  {
+   "image": "s019.jpg",
+   "count": 1
+  },
+  {
+   "image": "s020.jpg",
+   "count": 30
+  },
+  {
+   "image": "s021.jpg",
+   "count": 1
+  },
+  {
+   "image": "s022.jpg",
+   "count": 1
+  },
+  {
+   "image": "s023.jpg",
+   "count": 25
+  },
+  {
+   "image": "s024.jpg",
+   "count": 1
+  },
+  {
+   "image": "s025.jpg",
+   "count": 1
+  },
+  {
+   "image": "s026.jpg",
+   "count": 25
+  },
+  {
+   "image": "s027.jpg",
+   "count": 1
+  },
+  {
+   "image": "s028.jpg",
+   "count": 1
+  },
+  {
+   "image": "s029.jpg",
+   "count": 25
+  },
+  {
+   "image": "s030.jpg",
+   "count": 15
+  },
+  {
+   "image": "s031.jpg",
+   "count": 1
+  },
+  {
+   "image": "s032.jpg",
+   "count": 1
+  },
+  {
+   "image": "s033.jpg",
+   "count": 1
+  },
+  {
+   "image": "s034.jpg",
+   "count": 1
+  },
+  {
+   "image": "s035.jpg",
+   "count": 8
+  },
+  {
+   "image": "s036.jpg",
+   "count": 1
+  },
+  {
+   "image": "s037.jpg",
+   "count": 1
+  },
+  {
+   "image": "s038.jpg",
+   "count": 1
+  },
+  {
+   "image": "s039.jpg",
+   "count": 1
+  },
+  {
+   "image": "s040.jpg",
+   "count": 30
+  }
+ ],
+ "calibration": {
+  "order": [
+   20,
+   6,
+   3,
+   11
+  ],
+  "points_normalized": [
+   [
+    0.5,
+    0.20170875125461155
+   ],
+   [
+    0.6726256847381592,
+    0.4692324744330512
+   ],
+   [
+    0.5,
+    0.8227350023057726
+   ],
+   [
+    0.36203932762145996,
+    0.5245890723334419
+   ]
+  ]
+ },
+ "darts": [
+  {
+   "frame": 32,
+   "label": "13",
+   "tip_normalized": [
+    0.5811582565307617,
+    0.44233729044596354
+   ]
+  },
+  {
+   "frame": 59,
+   "label": "MISS",
+   "tip_normalized": [
+    0.476735258102417,
+    0.867206064860026
+   ]
+  },
+  {
+   "frame": 86,
+   "label": "25",
+   "tip_normalized": [
+    0.5050405502319336,
+    0.5118364969889323
+   ]
+  },
+  {
+   "frame": 174,
+   "label": "20",
+   "tip_normalized": [
+    0.49141106605529783,
+    0.32906585269504124
+   ]
+  },
+  {
+   "frame": 201,
+   "label": "1",
+   "tip_normalized": [
+    0.5220798015594482,
+    0.3308718999226888
+   ]
+  },
+  {
+   "frame": 228,
+   "label": "20",
+   "tip_normalized": [
+    0.4882649421691895,
+    0.3489163504706489
+   ]
+  }
+ ]
+}

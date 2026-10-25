@@ -125,3 +125,32 @@ def evaluate_video(video: str | Path, truth_path: str | Path, calib_noise: float
     if calib_noise > 0:
         calib = noisy_calibration(calib, calib_noise)
     return evaluate_frames(read_video(video), data["darts"], calib)
+
+
+def read_fixture(path: str | Path) -> tuple[dict, Iterable[np.ndarray]]:
+    """Liest eine mit Scenario.export_fixture erzeugte Szene (Einzelbilder + Wiederholungen)."""
+    path = Path(path)
+    data = json.loads((path / "scenario.json").read_text())
+
+    def frames() -> Iterable[np.ndarray]:
+        for state in data["states"]:
+            img = cv2.imread(str(path / state["image"]))
+            for _ in range(state["count"]):
+                yield img
+
+    return data, frames()
+
+
+def evaluate_fixture(path: str | Path, config: DetectorConfig | None = None) -> Report:
+    data, frames = read_fixture(path)
+    w, h = data["width"], data["height"]
+    calib_data = data["calibration"]
+    calib = Calibration.from_points({
+        seg: (x * w, y * h) for seg, (x, y) in zip(calib_data["order"], calib_data["points_normalized"])
+    })
+    truth = [
+        {"frame": d["frame"], "label": d["label"],
+         "tip_mm": calib.to_board(d["tip_normalized"][0] * w, d["tip_normalized"][1] * h)}
+        for d in data["darts"]
+    ]
+    return evaluate_frames(frames, truth, calib, config)
